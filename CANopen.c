@@ -24,6 +24,8 @@
  */
 
 #include "CANopen.h"
+#include <math.h>
+#include <CO_epoll_interface.h>
 
 /* Get values from CO_config_t or from single default OD.h ********************/
 #ifdef CO_MULTIPLE_OD
@@ -1515,3 +1517,112 @@ void CO_process_SRDO(CO_t *co,
     }
 }
 #endif
+
+CO_t * CO_get()
+{
+    return CO;
+}
+
+void CO_init() {
+    uint32_t _heapMemoryUsed= 0;
+    CO = CO_new(NULL, &_heapMemoryUsed);
+    const char *cDeviceName = "can0";
+    CO_CANptrSocketCan_t iface_socket = {0};
+    iface_socket.can_ifindex = if_nametoindex(cDeviceName);
+    if(iface_socket.can_ifindex == 0) {
+
+    }
+
+    CO_ReturnError_t err = CO_ERROR_NO;
+    CO_epoll_t epRT;
+    uint32_t cTmrThreadInterval = 1000;
+    err = CO_epoll_create(&epRT, cTmrThreadInterval);
+    if(err != CO_ERROR_NO) {
+ 
+    }
+    iface_socket.epoll_fd = epRT.epoll_fd;
+
+    /* initialize CANopen */
+
+    err = CO_CANinit(CO, (void*)&iface_socket, 0);
+    if (err != CO_ERROR_NO) {
+   
+    }
+    uint16_t scaledBitrate = 125000 / 1000;
+    CO_LSS_address_t lssAddress = {.identity = {
+            .vendorID = OD_PERSIST_COMM.x1018_identity.vendor_ID,
+            .productCode = OD_PERSIST_COMM.x1018_identity.productCode,
+            .revisionNumber = OD_PERSIST_COMM.x1018_identity.revisionNumber,
+            .serialNumber = OD_PERSIST_COMM.x1018_identity.serialNumber
+        }};
+    uint8_t node_id = 1;
+    err = CO_LSSinit(CO, &lssAddress, &node_id, &scaledBitrate);
+    if(err != CO_ERROR_NO) {
+     
+    }
+
+        // Start the Node
+    uint32_t errInfo = 0;
+    err = CO_CANopenInit(CO,                /* CANopen object */
+                             NULL,              /* alternate NMT */
+                             NULL,              /* alternate em */
+                             OD,                /* Object dictionary */
+                             OD_STATUS_BITS,    /* Optional OD_statusBits */
+                             (CO_NMT_control_t)NMT_CONTROL,       /* CO_NMT_control_t */
+                             FIRST_HB_TIME,     /* firstHBTime_ms */
+                             SDO_SRV_TIMEOUT_TIME, /* SDOserverTimeoutTime_ms */
+                             SDO_CLI_TIMEOUT_TIME, /* SDOclientTimeoutTime_ms */
+                             SDO_CLI_BLOCK,     /* SDOclientBlockTransfer */
+                             node_id,
+                             &errInfo);
+    if(err != CO_ERROR_NO && err != CO_ERROR_NODE_ID_UNCONFIGURED_LSS) {
+    }
+
+    CO_CANsetNormalMode(CO->CANmodule);
+}
+
+bool CO_SendSDO_float(
+    uint16_t idx,
+    uint8_t subidx,
+    uint8_t node,
+    float value,
+    uint32_t timeDifference_us)
+{
+    CO_SDO_return_t SDO_ret = CO_SDOclient_setup(CO->SDOclient,
+                                    CO_CAN_ID_SDO_CLI + node,
+                                    CO_CAN_ID_SDO_SRV + node,
+                                    node);
+    if (SDO_ret != CO_SDO_RT_ok_communicationEnd)
+        return false;
+    value = round(value * 100.0)/100.0;
+    SDO_ret = CO_SDOclientDownloadInitiate(CO->SDOclient,
+                                idx,
+                                subidx,
+                                sizeof(value),
+                                500,
+                                false);
+    if (SDO_ret != CO_SDO_RT_ok_communicationEnd)
+        return false;
+    CO_fifo_write(&CO->SDOclient->bufFifo, (uint8_t *)&value, sizeof(value), NULL);
+
+    /* if data size was not known before and is known now, update SDO */
+    CO_SDOclientDownloadInitiateSize(CO->SDOclient, sizeof(value));
+    int loop = 0;
+    CO_SDO_abortCode_t abortCode;
+    size_t sizeTransferred;
+    do {
+        SDO_ret = CO_SDOclientDownload(CO->SDOclient,
+                                    timeDifference_us,
+                                    false,
+                                    false,
+                                    &abortCode,
+                                    &sizeTransferred,
+                                    NULL);
+        if (++loop >= CO_CONFIG_GTW_BLOCK_DL_LOOP) {
+            break;
+        }
+    } while (SDO_ret == CO_SDO_RT_blockDownldInProgress);
+    if (SDO_ret != CO_SDO_RT_ok_communicationEnd)
+        return false;
+    return true;
+}

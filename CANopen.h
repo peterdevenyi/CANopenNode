@@ -667,6 +667,15 @@ void CO_process_SRDO(CO_t *co,
                      uint32_t *timerNext_us);
 #endif
 
+CO_t * CO_get();
+void CO_init();
+bool CO_SendSDO_float(
+    uint16_t idx,
+    uint8_t subidx,
+    uint8_t node,
+    float value,
+    uint32_t timeDifference_us);
+
 /** @} */ /* CO_CANopen */
 
 #ifdef __cplusplus
