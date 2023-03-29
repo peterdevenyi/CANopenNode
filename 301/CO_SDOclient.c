@@ -541,7 +541,7 @@ CO_SDO_return_t CO_SDOclientDownload(CO_SDOclient_t *SDO_C,
                               &SDO_C->OD_IO, false);
 
             if (odRet != ODR_OK) {
-                abortCode = (CO_SDO_abortCode_t)OD_getSDOabCode(odRet);
+                abortCode = OD_getSDOabCode(odRet);
                 ret = CO_SDO_RT_endedWithClientAbort;
             }
             else if ((SDO_C->OD_IO.stream.attribute & ODA_SDO_RW) == 0) {
@@ -563,6 +563,7 @@ CO_SDO_return_t CO_SDOclientDownload(CO_SDOclient_t *SDO_C,
             uint8_t buf[CO_CONFIG_SDO_CLI_BUFFER_SIZE + 2];
 
             CO_fifo_read(&SDO_C->bufFifo, buf, count, NULL);
+
             SDO_C->sizeTran += count;
 
             /* error: no data */
@@ -630,7 +631,7 @@ CO_SDO_return_t CO_SDOclientDownload(CO_SDOclient_t *SDO_C,
 
                 /* verify for errors in write */
                 if (odRet != ODR_OK && odRet != ODR_PARTIAL) {
-                    abortCode = (CO_SDO_abortCode_t)OD_getSDOabCode(odRet);
+                    abortCode = OD_getSDOabCode(odRet);
                     ret = CO_SDO_RT_endedWithServerAbort;
                 }
                 /* error if OD variable was written completely,
@@ -1185,7 +1186,7 @@ CO_SDO_return_t CO_SDOclientUpload(CO_SDOclient_t *SDO_C,
                               &SDO_C->OD_IO, false);
 
             if (odRet != ODR_OK) {
-                abortCode = (CO_SDO_abortCode_t)OD_getSDOabCode(odRet);
+                abortCode = OD_getSDOabCode(odRet);
                 ret = CO_SDO_RT_endedWithClientAbort;
             }
             else if ((SDO_C->OD_IO.stream.attribute & ODA_SDO_RW) == 0) {
@@ -1225,7 +1226,7 @@ CO_SDO_return_t CO_SDOclientUpload(CO_SDOclient_t *SDO_C,
             CO_UNLOCK_OD(SDO_C->CANdevTx);
 
             if (odRet != ODR_OK && odRet != ODR_PARTIAL) {
-                abortCode = (CO_SDO_abortCode_t)OD_getSDOabCode(odRet);
+                abortCode = OD_getSDOabCode(odRet);
                 ret = CO_SDO_RT_endedWithServerAbort;
             }
             else {

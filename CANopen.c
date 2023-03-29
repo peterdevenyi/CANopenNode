@@ -24,7 +24,6 @@
  */
 
 #include "CANopen.h"
-#include <math.h>
 #include <CO_epoll_interface.h>
 
 /* Get values from CO_config_t or from single default OD.h ********************/
@@ -321,6 +320,22 @@
 #else
 #define ON_MULTI_OD(sentence)
 #endif
+
+/* default values for CO_CANopenInit() */
+#define NMT_CONTROL \
+            CO_NMT_STARTUP_TO_OPERATIONAL \
+          | CO_NMT_ERR_ON_ERR_REG \
+          | CO_ERR_REG_GENERIC_ERR \
+          | CO_ERR_REG_COMMUNICATION
+#define FIRST_HB_TIME 500
+#define SDO_SRV_TIMEOUT_TIME 1000
+#define SDO_CLI_TIMEOUT_TIME 500
+#define SDO_CLI_BLOCK false
+#define OD_STATUS_BITS NULL
+
+// Temporary solution until switching to C++. We should avoid using globals.
+CO_t *CO = NULL;
+CO_epoll_t epRT;
 
 CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed) {
     CO_t *co = NULL;
@@ -845,7 +860,6 @@ bool_t CO_isLSSslaveEnabled(CO_t *co) {
 /******************************************************************************/
 CO_ReturnError_t CO_CANinit(CO_t *co, void *CANptr, uint16_t bitRate) {
     CO_ReturnError_t err;
-
     if (co == NULL) return CO_ERROR_ILLEGAL_ARGUMENT;
 
     co->CANmodule->CANnormal = false;
@@ -1518,27 +1532,238 @@ void CO_process_SRDO(CO_t *co,
 }
 #endif
 
-CO_t * CO_get()
-{
+CO_t *CO_get(void) {
     return CO;
 }
 
-void CO_init() {
+/******************************************************************************/
+ODR_t OD_readUpdated(OD_stream_t *stream, void *buf,
+                      OD_size_t count, OD_size_t *countRead)
+{
+    if (stream == NULL || buf == NULL || countRead == NULL) {
+        return ODR_DEV_INCOMPAT;
+    }
+
+    OD_size_t dataLenToCopy = stream->dataLength; /* length of OD variable */
+    const uint8_t *dataOrig = stream->dataOrig;
+
+    if (dataOrig == NULL) {
+        return ODR_SUB_NOT_EXIST;
+    }
+
+    ODR_t returnCode = ODR_OK;
+
+    /* If previous read was partial or OD variable length is larger than
+     * current buffer size, then data was (will be) read in several segments */
+    if (stream->dataOffset > 0 || dataLenToCopy > count) {
+        if (stream->dataOffset >= dataLenToCopy) {
+            return ODR_DEV_INCOMPAT;
+        }
+        /* Reduce for already copied data */
+        dataLenToCopy -= stream->dataOffset;
+        dataOrig += stream->dataOffset;
+
+        if (dataLenToCopy > count) {
+            /* Not enough space in destination buffer */
+            dataLenToCopy = count;
+            stream->dataOffset += dataLenToCopy;
+            returnCode = ODR_PARTIAL;
+        }
+        else {
+            stream->dataOffset = 0; /* copy finished, reset offset */
+        }
+    }
+
+    memcpy(buf, dataOrig, dataLenToCopy);
+
+    *countRead = dataLenToCopy;
+    return returnCode;
+}
+
+/******************************************************************************/
+ODR_t OD_writeUpdated(OD_stream_t *stream, const void *buf,
+                       OD_size_t count, OD_size_t *countWritten)
+{
+    if (stream == NULL || buf == NULL || countWritten == NULL) {
+        return ODR_DEV_INCOMPAT;
+    }
+
+    OD_size_t dataLenToCopy = stream->dataLength; /* length of OD variable */
+    uint8_t *dataOrig = stream->dataOrig;
+
+    if (dataOrig == NULL) {
+        return ODR_SUB_NOT_EXIST;
+    }
+
+    ODR_t returnCode = ODR_OK;
+
+    /* If previous write was partial or OD variable length is larger than
+     * current buffer size, then data was (will be) written in several
+     * segments */
+    if (stream->dataOffset > 0 || dataLenToCopy > count) {
+        if (stream->dataOffset >= dataLenToCopy) {
+            return ODR_DEV_INCOMPAT;
+        }
+        /* reduce for already copied data */
+        dataLenToCopy -= stream->dataOffset;
+        dataOrig += stream->dataOffset;
+
+        if (dataLenToCopy > count) {
+            /* Remaining data space in OD variable is larger than current count
+             * of data, so only current count of data will be copied */
+            dataLenToCopy = count;
+            stream->dataOffset += dataLenToCopy;
+            returnCode = ODR_PARTIAL;
+        }
+        else {
+            stream->dataOffset = 0; /* copy finished, reset offset */
+        }
+    }
+
+    if (dataLenToCopy < count) {
+        /* OD variable is smaller than current amount of data */
+        return ODR_DATA_LONG;
+    }
+
+    memcpy(dataOrig, buf, dataLenToCopy);
+
+    *countWritten = dataLenToCopy;
+    return returnCode;
+}
+
+uint8_t *OD_actuatorCommand_flagsPDO = NULL;
+uint8_t *OD_actuatorState_flagsPDO = NULL;
+
+
+bool CO_setup_sequence(uint32_t timeDifference_us)
+{
+    CO_NMT_reset_cmd_t reset = CO_RESET_NOT;
+    CO_epoll_wait(&epRT);
+    CO_epoll_processMain(&epRT, CO, false, &reset);
+    CO_epoll_processLast(&epRT);
+    usleep(200000);
+    CO_epoll_wait(&epRT);
+    CO_epoll_processMain(&epRT, CO, false, &reset);
+    CO_epoll_processLast(&epRT);
+    usleep(200000);
+    CO_epoll_wait(&epRT);
+    CO_epoll_processMain(&epRT, CO, false, &reset);
+    CO_epoll_processLast(&epRT);
+    usleep(200000);
+    CO_epoll_wait(&epRT);
+    CO_NMT_sendCommand(CO->NMT, CO_NMT_ENTER_OPERATIONAL, 32);
+    CO_epoll_processMain(&epRT, CO, false, &reset);
+    CO_epoll_processLast(&epRT);
+    usleep(200000);
+    CO_epoll_wait(&epRT);
+    uint8_t setupHBConsumerTime[4] = {0xC8, 0x00, 0x01, 0x00};
+    CO_SendSDO_bytes(0x1016, 01, 32, &setupHBConsumerTime[0], 4, timeDifference_us);
+    CO_epoll_processMain(&epRT, CO, false, &reset);
+    CO_epoll_processLast(&epRT);
+    usleep(200000);
+    CO_epoll_wait(&epRT);
+    // Stop motor.
+    OD_RAM.x2000_actuatorCommand.position = 64259;
+    CO_epoll_processRT(&epRT, CO, false);
+    CO_epoll_processMain(&epRT, CO, false, &reset);
+    CO_epoll_processLast(&epRT);
+    return true;
+}
+
+void CO_update_pos(uint16_t position, uint32_t timeDifference_us) {
+    CO_NMT_reset_cmd_t reset = CO_RESET_NOT;
+    usleep(100000);
+    CO_epoll_wait(&epRT);
+    OD_RAM.x2000_actuatorCommand.position = position;
+    CO_epoll_processRT(&epRT, CO, false);
+    CO_epoll_processMain(&epRT, CO, false, &reset);
+    CO_epoll_processLast(&epRT);
+}
+
+bool CO_exec_epoll(uint16_t position, uint32_t timeDifference_us) {
+    static uint8_t run_twice = 0;
+    //static bool run_out = false;
+    static bool stop = false;
+    static bool send_service = false;
+    // This state machine is a pure hack until more understanding is gained on the internals of SDO/PDO messaging.
+    CO_NMT_reset_cmd_t reset = CO_RESET_NOT;
+    CO_epoll_wait(&epRT);
+    if (run_twice < 3)
+        run_twice++;
+    if (run_twice == 3 && CO->NMT->operatingStatePrev == CO_NMT_OPERATIONAL)
+    {
+        run_twice++;
+        CO_NMT_sendCommand(CO->NMT, CO_NMT_ENTER_OPERATIONAL, 32);
+    }
+    else if (run_twice > 3 && !send_service)
+    {
+        send_service = true;
+        uint8_t testArray[4] = {0xC8, 0x00, 0x01, 0x00};
+        CO_SendSDO_bytes(0x1016, 01, 32, &testArray[0], 4, timeDifference_us);
+    }
+    else if (run_twice > 3 && send_service && !stop)
+    {
+        stop = true;
+        OD_RAM.x2000_actuatorCommand.position = 64259; //stop
+        CO_epoll_processRT(&epRT, CO, false);
+    }
+    else if (run_twice > 3 && stop)
+    {
+        // OD_RAM.x2000_actuatorCommand.position = position; //set pos
+        // /* static variable is like global: initialized to 0, then keeps its value */
+        // static uint16_t value_old = 0;
+        // /* Detect change of state and trigger TPDO. Of course, variable must be
+        // * mapped to event driven TPDO for this to have effect. */
+        // if (OD_RAM.x2000_actuatorCommand.position != value_old) {
+        //     pos_set = true;
+        //     CO_epoll_processRT(&epRT, CO, false);
+        //     printf("TestPrint %d %d\n", OD_RAM.x2001_actuatorStatus.errorCode, OD_RAM.x2001_actuatorStatus.statusFlags);
+        // }
+        // if (!run_out)
+        {
+            OD_RAM.x2000_actuatorCommand.position = position;
+            //run_out = true;
+            CO_epoll_processRT(&epRT, CO, false);
+        }
+
+        //value_old = OD_RAM.x2000_actuatorCommand.position;
+    }
+
+    CO_epoll_processMain(&epRT, CO, false, &reset);
+    CO_epoll_processLast(&epRT);
+    return true;
+}
+
+bool CO_init(uint8_t node_id, uint32_t bitrate) {
     uint32_t _heapMemoryUsed= 0;
     CO = CO_new(NULL, &_heapMemoryUsed);
     const char *cDeviceName = "can0";
     CO_CANptrSocketCan_t iface_socket = {0};
     iface_socket.can_ifindex = if_nametoindex(cDeviceName);
     if(iface_socket.can_ifindex == 0) {
-
+        return false;
     }
 
+    OD_extension_t OD_actuatorCommand_extension;
+    OD_actuatorCommand_extension.object = OD_GET(H2000, OD_H2000_PDO_ACTUATOR_COMMANDS);
+    OD_actuatorCommand_extension.read = OD_readUpdated;
+    OD_actuatorCommand_extension.write = OD_writeUpdated;
+    OD_extension_init(OD_ENTRY_H2000_actuatorCommand,
+                      &OD_actuatorCommand_extension);
+    OD_actuatorCommand_flagsPDO = OD_getFlagsPDO(OD_ENTRY_H2000_actuatorCommand);
+    OD_extension_t OD_actuatorStates_extension;
+    OD_actuatorStates_extension.object = OD_GET(H2001, OD_H2001_PDO_ACTUATOR_STATES);
+    OD_actuatorStates_extension.read = OD_readUpdated;
+    OD_actuatorStates_extension.write = OD_writeUpdated;
+    OD_extension_init(OD_ENTRY_H2001_actuatorStatus,
+                      &OD_actuatorStates_extension);
+    OD_actuatorState_flagsPDO = OD_getFlagsPDO(OD_ENTRY_H2001_actuatorStatus);
+
     CO_ReturnError_t err = CO_ERROR_NO;
-    CO_epoll_t epRT;
-    uint32_t cTmrThreadInterval = 1000;
-    err = CO_epoll_create(&epRT, cTmrThreadInterval);
+    uint32_t cTmrThreadInterval_us = 100;
+    err = CO_epoll_create(&epRT, cTmrThreadInterval_us);
     if(err != CO_ERROR_NO) {
- 
+        return false;
     }
     iface_socket.epoll_fd = epRT.epoll_fd;
 
@@ -1546,40 +1771,57 @@ void CO_init() {
 
     err = CO_CANinit(CO, (void*)&iface_socket, 0);
     if (err != CO_ERROR_NO) {
-   
+        return false;
     }
-    uint16_t scaledBitrate = 125000 / 1000;
+    uint16_t scaledBitrate = bitrate / 1000;
     CO_LSS_address_t lssAddress = {.identity = {
-            .vendorID = OD_PERSIST_COMM.x1018_identity.vendor_ID,
-            .productCode = OD_PERSIST_COMM.x1018_identity.productCode,
-            .revisionNumber = OD_PERSIST_COMM.x1018_identity.revisionNumber,
-            .serialNumber = OD_PERSIST_COMM.x1018_identity.serialNumber
+            .vendorID = OD_RAM.x1018_identityObject.vendorId,
+            .productCode = OD_RAM.x1018_identityObject.productCode,
+            .revisionNumber = OD_RAM.x1018_identityObject.revisionNumber,
+            .serialNumber = OD_RAM.x1018_identityObject.serialNumber
         }};
-    uint8_t node_id = 1;
     err = CO_LSSinit(CO, &lssAddress, &node_id, &scaledBitrate);
     if(err != CO_ERROR_NO) {
-     
+        return false;
     }
 
         // Start the Node
     uint32_t errInfo = 0;
     err = CO_CANopenInit(CO,                /* CANopen object */
-                             NULL,              /* alternate NMT */
-                             NULL,              /* alternate em */
-                             OD,                /* Object dictionary */
-                             OD_STATUS_BITS,    /* Optional OD_statusBits */
-                             (CO_NMT_control_t)NMT_CONTROL,       /* CO_NMT_control_t */
-                             FIRST_HB_TIME,     /* firstHBTime_ms */
-                             SDO_SRV_TIMEOUT_TIME, /* SDOserverTimeoutTime_ms */
-                             SDO_CLI_TIMEOUT_TIME, /* SDOclientTimeoutTime_ms */
-                             SDO_CLI_BLOCK,     /* SDOclientBlockTransfer */
-                             node_id,
-                             &errInfo);
+                         NULL,              /* alternate NMT */
+                         NULL,              /* alternate em */
+                         OD,                /* Object dictionary */
+                         OD_STATUS_BITS,    /* Optional OD_statusBits */
+                         (CO_NMT_control_t)NMT_CONTROL,       /* CO_NMT_control_t */
+                         FIRST_HB_TIME,     /* firstHBTime_ms */
+                         SDO_SRV_TIMEOUT_TIME, /* SDOserverTimeoutTime_ms */
+                         SDO_CLI_TIMEOUT_TIME, /* SDOclientTimeoutTime_ms */
+                         SDO_CLI_BLOCK,     /* SDOclientBlockTransfer */
+                         node_id,
+                         &errInfo);
     if(err != CO_ERROR_NO && err != CO_ERROR_NODE_ID_UNCONFIGURED_LSS) {
+        return false;
+    }
+
+     err = CO_CANopenInitPDO(CO,             /* CANopen object */
+                            CO->em,         /* emergency object */
+                            OD,             /* Object dictionary */
+                            node_id,
+                            &errInfo);
+    if(err != CO_ERROR_NO && err != CO_ERROR_NODE_ID_UNCONFIGURED_LSS) {
+        if (err == CO_ERROR_OD_PARAMETERS) {
+            log_printf(LOG_CRIT, DBG_OD_ENTRY, errInfo);
+        }
+        else {
+            log_printf(LOG_CRIT, DBG_CAN_OPEN, "CO_CANopenInitPDO()", err);
+        }
+        return false;
     }
 
     CO_CANsetNormalMode(CO->CANmodule);
+    return true;
 }
+
 
 bool CO_SendSDO_float(
     uint16_t idx,
@@ -1593,8 +1835,11 @@ bool CO_SendSDO_float(
                                     CO_CAN_ID_SDO_SRV + node,
                                     node);
     if (SDO_ret != CO_SDO_RT_ok_communicationEnd)
+    {
+        //printf("TestPrint CO_SendSDO_float error %d\n", SDO_ret);
         return false;
-    value = round(value * 100.0)/100.0;
+    }
+
     SDO_ret = CO_SDOclientDownloadInitiate(CO->SDOclient,
                                 idx,
                                 subidx,
@@ -1602,11 +1847,64 @@ bool CO_SendSDO_float(
                                 500,
                                 false);
     if (SDO_ret != CO_SDO_RT_ok_communicationEnd)
+    {
+        //printf("TestPrint CO_SendSDO_float error2 %d\n", SDO_ret);
         return false;
+    }
+
     CO_fifo_write(&CO->SDOclient->bufFifo, (uint8_t *)&value, sizeof(value), NULL);
 
     /* if data size was not known before and is known now, update SDO */
     CO_SDOclientDownloadInitiateSize(CO->SDOclient, sizeof(value));
+    int loop = 0;
+    CO_SDO_abortCode_t abortCode;
+    size_t sizeTransferred;
+    do {
+        SDO_ret = CO_SDOclientDownload(CO->SDOclient,
+                                    timeDifference_us,
+                                    false,
+                                    false,
+                                    &abortCode,
+                                    &sizeTransferred,
+                                    NULL);
+        if (++loop >= CO_CONFIG_GTW_BLOCK_DL_LOOP) {
+            break;
+        }
+    } while (SDO_ret == CO_SDO_RT_blockDownldInProgress);
+    if (SDO_ret != CO_SDO_RT_ok_communicationEnd)
+    {
+        //printf("TestPrint CO_SendSDO_float error3 %d\n", SDO_ret);
+        return false;
+    }
+    return true;
+}
+
+bool CO_SendSDO_bytes(
+    uint16_t idx,
+    uint8_t subidx,
+    uint8_t node,
+    uint8_t* values,
+    size_t size,
+    uint32_t timeDifference_us)
+{
+    CO_SDO_return_t SDO_ret = CO_SDOclient_setup(CO->SDOclient,
+                                    CO_CAN_ID_SDO_CLI + node,
+                                    CO_CAN_ID_SDO_SRV + node,
+                                    node);
+    if (SDO_ret != CO_SDO_RT_ok_communicationEnd)
+        return false;
+    SDO_ret = CO_SDOclientDownloadInitiate(CO->SDOclient,
+                                idx,
+                                subidx,
+                                size,
+                                500,
+                                false);
+    if (SDO_ret != CO_SDO_RT_ok_communicationEnd)
+        return false;
+    CO_fifo_write(&CO->SDOclient->bufFifo, values, size, NULL);
+
+    /* if data size was not known before and is known now, update SDO */
+    CO_SDOclientDownloadInitiateSize(CO->SDOclient, size);
     int loop = 0;
     CO_SDO_abortCode_t abortCode;
     size_t sizeTransferred;

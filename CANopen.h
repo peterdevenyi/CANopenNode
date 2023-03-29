@@ -276,6 +276,7 @@ typedef void CO_config_t;
  * CANopen object - collection of all CANopenNode objects
  */
 typedef struct {
+    uint8_t nodeId;
     bool_t nodeIdUnconfigured; /**< True in un-configured LSS slave */
  #if defined CO_MULTIPLE_OD || defined CO_DOXYGEN
     CO_config_t *config; /**< Remember the configuration parameters */
@@ -667,13 +668,23 @@ void CO_process_SRDO(CO_t *co,
                      uint32_t *timerNext_us);
 #endif
 
-CO_t * CO_get();
-void CO_init();
+CO_t *CO_get(void);
+bool CO_setup_sequence(uint32_t timeDifference_us);
+void CO_update_pos(uint16_t position, uint32_t timeDifference_us);
+bool CO_exec_epoll(uint16_t position, uint32_t timeDifference_us);
+bool CO_init(uint8_t node_id, uint32_t bitrate);
 bool CO_SendSDO_float(
     uint16_t idx,
     uint8_t subidx,
     uint8_t node,
     float value,
+    uint32_t timeDifference_us);
+bool CO_SendSDO_bytes(
+    uint16_t idx,
+    uint8_t subidx,
+    uint8_t node,
+    uint8_t* values,
+    size_t size,
     uint32_t timeDifference_us);
 
 /** @} */ /* CO_CANopen */

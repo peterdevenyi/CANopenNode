@@ -561,7 +561,7 @@ static bool_t validateAndWriteToOD(CO_SDOserver_t *SDO,
 
     /* verify write error value */
     if (odRet != ODR_OK && odRet != ODR_PARTIAL) {
-        *abortCode = (CO_SDO_abortCode_t)OD_getSDOabCode(odRet);
+        *abortCode = OD_getSDOabCode(odRet);
         SDO->state = CO_SDO_ST_ABORT;
         return false;
     }
@@ -619,7 +619,7 @@ static bool_t readFromOd(CO_SDOserver_t *SDO,
         CO_UNLOCK_OD(SDO->CANdevTx);
 
         if (odRet != ODR_OK && odRet != ODR_PARTIAL) {
-            *abortCode = (CO_SDO_abortCode_t)OD_getSDOabCode(odRet);
+            *abortCode = OD_getSDOabCode(odRet);
             SDO->state = CO_SDO_ST_ABORT;
             return false;
         }
@@ -742,7 +742,7 @@ CO_SDO_return_t CO_SDOserver_process(CO_SDOserver_t *SDO,
                 odRet = OD_getSub(OD_find(SDO->OD, SDO->index), SDO->subIndex,
                                   &SDO->OD_IO, false);
                 if (odRet != ODR_OK) {
-                    abortCode = (CO_SDO_abortCode_t)OD_getSDOabCode(odRet);
+                    abortCode = OD_getSDOabCode(odRet);
                     SDO->state = CO_SDO_ST_ABORT;
                 }
                 else {
@@ -855,7 +855,7 @@ CO_SDO_return_t CO_SDOserver_process(CO_SDOserver_t *SDO,
                 CO_UNLOCK_OD(SDO->CANdevTx);
 
                 if (odRet != ODR_OK) {
-                    abortCode = (CO_SDO_abortCode_t)OD_getSDOabCode(odRet);
+                    abortCode = OD_getSDOabCode(odRet);
                     SDO->state = CO_SDO_ST_ABORT;
                     break;
                 }
