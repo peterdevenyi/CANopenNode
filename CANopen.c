@@ -1380,10 +1380,8 @@ CO_NMT_reset_cmd_t CO_process(CO_t *co,
 
     /* NMT_Heartbeat */
     if (CO_GET_CNT(NMT) == 1) {
-        bool skip_send = !(CO_GET_CNT(HB_PROD) > 0);
         reset = CO_NMT_process(co->NMT,
                                &NMTstate,
-                               skip_send,
                                timeDifference_us,
                                timerNext_us);
     }
