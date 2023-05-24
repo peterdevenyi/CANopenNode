@@ -203,6 +203,8 @@ typedef struct {
     OD_entry_t *ENTRY_H1017; /**< OD entry for @ref CO_NMT_init() */
     /** Number of Heartbeat consumer objects, 0 or 1 */
     uint8_t CNT_HB_CONS;
+    /** Number of Heartbeat producer objects, 0 or 1 */
+    uint8_t CNT_HB_PROD;
     /** Number of internal consumers (CANrx), used inside Heartbeat consumer
      * object, 1 to 127. */
     uint8_t CNT_ARR_1016;
@@ -266,6 +268,8 @@ typedef struct {
     uint8_t CNT_GTWA;
     /** Number of trace objects, 0 or more. */
     uint16_t CNT_TRACE;
+    OD_entry_t *ENTRY_H2000; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H2001; /**< OD entry for @ref CO_RPDO_init() */
 } CO_config_t;
 #else
 typedef void CO_config_t;
@@ -668,24 +672,29 @@ void CO_process_SRDO(CO_t *co,
                      uint32_t *timerNext_us);
 #endif
 
-CO_t *CO_get(void);
-bool CO_setup_sequence(uint32_t timeDifference_us);
-void CO_update_pos(uint16_t position, uint32_t timeDifference_us);
-bool CO_exec_epoll(uint16_t position, uint32_t timeDifference_us);
-bool CO_init(uint8_t node_id, uint32_t bitrate);
-bool CO_SendSDO_float(
-    uint16_t idx,
-    uint8_t subidx,
-    uint8_t node,
-    float value,
-    uint32_t timeDifference_us);
+//! Setup a new node instance for a remote device.
+CO_t *CO_init(CO_config_t *config, uint8_t node_id, uint8_t id, uint32_t bitrate, const char* device);
+void CO_start(CO_t *co, int index, int node_id);
+//! Polls for new PDO/NMT/SDO messages.
+bool CO_exec_epoll(CO_t *co, int index);
+bool CO_is_operational(CO_t *co);
+//! Sends an SDO message of a float value to the device defined by \a node.
+int CO_SendSDO_float(
+   CO_t *co,
+   uint16_t idx,
+   uint8_t subidx,
+   uint8_t node,
+   float value,
+   uint32_t timeDifference_us);
+//! Sends an SDO message of a bytearray value with \a size to the device defined by \a node.
 bool CO_SendSDO_bytes(
-    uint16_t idx,
-    uint8_t subidx,
-    uint8_t node,
-    uint8_t* values,
-    size_t size,
-    uint32_t timeDifference_us);
+   CO_t *co,
+   uint16_t idx,
+   uint8_t subidx,
+   uint8_t node,
+   uint8_t* values,
+   size_t size,
+   uint32_t timeDifference_us);
 
 /** @} */ /* CO_CANopen */
 

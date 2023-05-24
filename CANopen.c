@@ -25,13 +25,20 @@
 
 #include "CANopen.h"
 #include <CO_epoll_interface.h>
+#include <px4_platform_common/log.h>
+#ifdef NUTTX_PLATFORM
+#include <board_config.h>
+#endif // NUTTX_PLATFORM
 
 /* Get values from CO_config_t or from single default OD.h ********************/
 #ifdef CO_MULTIPLE_OD
+#include "OD_port_flap.h"
+#include "OD_starbrd_flap.h"
+#include "OD_elev_flap.h"
+#include "OD_lift.h"
 #define CO_GET_CO(obj) co->obj
 #define CO_GET_CNT(obj) co->config->CNT_##obj
 #define OD_GET(entry, index) co->config->ENTRY_##entry
-
 #else
 #include "OD.h"
 #define CO_GET_CO(obj) CO_##obj
@@ -45,9 +52,6 @@
  * - calculate indexes: CO_RX_IDX_xx and CO_TX_IDX_xx
  * - calculate total count of CAN message buffers: CO_CNT_ALL_RX_MSGS and
  *   CO_CNT_ALL_TX_MSGS. */
-#if OD_CNT_NMT != 1
- #error OD_CNT_NMT from OD.h not correct!
-#endif
 #define CO_RX_CNT_NMT_SLV OD_CNT_NMT
 #if (CO_CONFIG_NMT) & CO_CONFIG_NMT_MASTER
  #define CO_TX_CNT_NMT_MST 1
@@ -333,9 +337,9 @@
 #define SDO_CLI_BLOCK false
 #define OD_STATUS_BITS NULL
 
-// Temporary solution until switching to C++. We should avoid using globals.
-CO_t *CO = NULL;
-CO_epoll_t epRT;
+#define MAX_EPOLL_COUNT 10
+CO_epoll_t ep[MAX_EPOLL_COUNT];
+
 
 CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed) {
     CO_t *co = NULL;
@@ -1376,8 +1380,10 @@ CO_NMT_reset_cmd_t CO_process(CO_t *co,
 
     /* NMT_Heartbeat */
     if (CO_GET_CNT(NMT) == 1) {
+        bool skip_send = !(CO_GET_CNT(HB_PROD) > 0);
         reset = CO_NMT_process(co->NMT,
                                &NMTstate,
+                               skip_send,
                                timeDifference_us,
                                timerNext_us);
     }
@@ -1532,10 +1538,6 @@ void CO_process_SRDO(CO_t *co,
 }
 #endif
 
-CO_t *CO_get(void) {
-    return CO;
-}
-
 /******************************************************************************/
 ODR_t OD_readUpdated(OD_stream_t *stream, void *buf,
                       OD_size_t count, OD_size_t *countRead)
@@ -1634,160 +1636,103 @@ ODR_t OD_writeUpdated(OD_stream_t *stream, const void *buf,
 uint8_t *OD_actuatorCommand_flagsPDO = NULL;
 uint8_t *OD_actuatorState_flagsPDO = NULL;
 
-
-bool CO_setup_sequence(uint32_t timeDifference_us)
+//----------------------------------------------------------------------------------------------------------------------------
+bool CO_is_operational(CO_t *co)
 {
-    CO_NMT_reset_cmd_t reset = CO_RESET_NOT;
-    CO_epoll_wait(&epRT);
-    CO_epoll_processMain(&epRT, CO, false, &reset);
-    CO_epoll_processLast(&epRT);
-    usleep(200000);
-    CO_epoll_wait(&epRT);
-    CO_epoll_processMain(&epRT, CO, false, &reset);
-    CO_epoll_processLast(&epRT);
-    usleep(200000);
-    CO_epoll_wait(&epRT);
-    CO_epoll_processMain(&epRT, CO, false, &reset);
-    CO_epoll_processLast(&epRT);
-    usleep(200000);
-    CO_epoll_wait(&epRT);
-    CO_NMT_sendCommand(CO->NMT, CO_NMT_ENTER_OPERATIONAL, 32);
-    CO_epoll_processMain(&epRT, CO, false, &reset);
-    CO_epoll_processLast(&epRT);
-    usleep(200000);
-    CO_epoll_wait(&epRT);
+    return co->NMT->operatingState == CO_NMT_OPERATIONAL;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------
+void CO_start(CO_t *co, int index, int node_id)
+{
+    CO_NMT_sendCommand(co->NMT, CO_NMT_ENTER_OPERATIONAL, node_id);
     uint8_t setupHBConsumerTime[4] = {0xC8, 0x00, 0x01, 0x00};
-    CO_SendSDO_bytes(0x1016, 01, 32, &setupHBConsumerTime[0], 4, timeDifference_us);
-    CO_epoll_processMain(&epRT, CO, false, &reset);
-    CO_epoll_processLast(&epRT);
-    usleep(200000);
-    CO_epoll_wait(&epRT);
-    // Stop motor.
-    OD_RAM.x2000_actuatorCommand.position = 64259;
-    CO_epoll_processRT(&epRT, CO, false);
-    CO_epoll_processMain(&epRT, CO, false, &reset);
-    CO_epoll_processLast(&epRT);
-    return true;
+    CO_SendSDO_bytes(co, 0x1016, 1, node_id, &setupHBConsumerTime[0], 4, 0);
 }
 
-void CO_update_pos(uint16_t position, uint32_t timeDifference_us) {
-    CO_NMT_reset_cmd_t reset = CO_RESET_NOT;
-    usleep(100000);
-    CO_epoll_wait(&epRT);
-    OD_RAM.x2000_actuatorCommand.position = position;
-    CO_epoll_processRT(&epRT, CO, false);
-    CO_epoll_processMain(&epRT, CO, false, &reset);
-    CO_epoll_processLast(&epRT);
-}
-
-bool CO_exec_epoll(uint16_t position, uint32_t timeDifference_us) {
-    static uint8_t run_twice = 0;
-    //static bool run_out = false;
-    static bool stop = false;
-    static bool send_service = false;
-    // This state machine is a pure hack until more understanding is gained on the internals of SDO/PDO messaging.
-    CO_NMT_reset_cmd_t reset = CO_RESET_NOT;
-    CO_epoll_wait(&epRT);
-    if (run_twice < 3)
-        run_twice++;
-    if (run_twice == 3 && CO->NMT->operatingStatePrev == CO_NMT_OPERATIONAL)
-    {
-        run_twice++;
-        CO_NMT_sendCommand(CO->NMT, CO_NMT_ENTER_OPERATIONAL, 32);
-    }
-    else if (run_twice > 3 && !send_service)
-    {
-        send_service = true;
-        uint8_t testArray[4] = {0xC8, 0x00, 0x01, 0x00};
-        CO_SendSDO_bytes(0x1016, 01, 32, &testArray[0], 4, timeDifference_us);
-    }
-    else if (run_twice > 3 && send_service && !stop)
-    {
-        stop = true;
-        OD_RAM.x2000_actuatorCommand.position = 64259; //stop
-        CO_epoll_processRT(&epRT, CO, false);
-    }
-    else if (run_twice > 3 && stop)
-    {
-        // OD_RAM.x2000_actuatorCommand.position = position; //set pos
-        // /* static variable is like global: initialized to 0, then keeps its value */
-        // static uint16_t value_old = 0;
-        // /* Detect change of state and trigger TPDO. Of course, variable must be
-        // * mapped to event driven TPDO for this to have effect. */
-        // if (OD_RAM.x2000_actuatorCommand.position != value_old) {
-        //     pos_set = true;
-        //     CO_epoll_processRT(&epRT, CO, false);
-        //     printf("TestPrint %d %d\n", OD_RAM.x2001_actuatorStatus.errorCode, OD_RAM.x2001_actuatorStatus.statusFlags);
-        // }
-        // if (!run_out)
-        {
-            OD_RAM.x2000_actuatorCommand.position = position;
-            //run_out = true;
-            CO_epoll_processRT(&epRT, CO, false);
-        }
-
-        //value_old = OD_RAM.x2000_actuatorCommand.position;
-    }
-
-    CO_epoll_processMain(&epRT, CO, false, &reset);
-    CO_epoll_processLast(&epRT);
-    return true;
-}
-
-bool CO_init(uint8_t node_id, uint32_t bitrate) {
-    uint32_t _heapMemoryUsed= 0;
-    CO = CO_new(NULL, &_heapMemoryUsed);
-    const char *cDeviceName = "can0";
-    CO_CANptrSocketCan_t iface_socket = {0};
-    iface_socket.can_ifindex = if_nametoindex(cDeviceName);
-    if(iface_socket.can_ifindex == 0) {
+//----------------------------------------------------------------------------------------------------------------------------
+bool CO_exec_epoll(CO_t *co, int index)
+{
+    if (index >= MAX_EPOLL_COUNT)
         return false;
+
+    CO_NMT_reset_cmd_t reset = CO_RESET_NOT;
+    CO_epoll_wait(&ep[index], co);
+    CO_epoll_processRT(&ep[index], co, false);
+    CO_epoll_processMain(&ep[index], co, false, &reset);
+    CO_epoll_processLast(&ep[index]);
+    return true;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------
+CO_t *CO_init(CO_config_t *config, uint8_t node_id, uint8_t id, uint32_t bitrate, const char* device) {
+    uint32_t _heapMemoryUsed= 0;
+    CO_t *co = CO_new(config, &_heapMemoryUsed);
+    if (co == NULL)
+        return NULL;
+
+    CO_CANptrSocketCan_t iface_socket = {0};
+    iface_socket.can_ifindex = if_nametoindex(device);
+    if(iface_socket.can_ifindex == 0) {
+        return NULL;
     }
 
     OD_extension_t OD_actuatorCommand_extension;
     OD_actuatorCommand_extension.object = OD_GET(H2000, OD_H2000_PDO_ACTUATOR_COMMANDS);
     OD_actuatorCommand_extension.read = OD_readUpdated;
     OD_actuatorCommand_extension.write = OD_writeUpdated;
-    OD_extension_init(OD_ENTRY_H2000_actuatorCommand,
+    OD_extension_init(OD_GET(H2000, OD_H2000_PDO_ACTUATOR_COMMANDS),
                       &OD_actuatorCommand_extension);
-    OD_actuatorCommand_flagsPDO = OD_getFlagsPDO(OD_ENTRY_H2000_actuatorCommand);
+    OD_actuatorCommand_flagsPDO = OD_getFlagsPDO(OD_GET(H2000, OD_H2000_PDO_ACTUATOR_COMMANDS));
     OD_extension_t OD_actuatorStates_extension;
     OD_actuatorStates_extension.object = OD_GET(H2001, OD_H2001_PDO_ACTUATOR_STATES);
     OD_actuatorStates_extension.read = OD_readUpdated;
     OD_actuatorStates_extension.write = OD_writeUpdated;
-    OD_extension_init(OD_ENTRY_H2001_actuatorStatus,
+    OD_extension_init(OD_GET(H2001, OD_H2001_PDO_ACTUATOR_STATES),
                       &OD_actuatorStates_extension);
-    OD_actuatorState_flagsPDO = OD_getFlagsPDO(OD_ENTRY_H2001_actuatorStatus);
+    OD_actuatorState_flagsPDO = OD_getFlagsPDO(OD_GET(H2001, OD_H2001_PDO_ACTUATOR_STATES));
 
     CO_ReturnError_t err = CO_ERROR_NO;
-    uint32_t cTmrThreadInterval_us = 100;
-    err = CO_epoll_create(&epRT, cTmrThreadInterval_us);
-    if(err != CO_ERROR_NO) {
-        return false;
+    uint32_t cTmrThreadInterval_us = 80000;
+    if (id >= MAX_EPOLL_COUNT)
+    {
+        log_printf(LOG_DEBUG, DBG_ERRNO, "To many Epoll insances");
+        return NULL;
     }
-    iface_socket.epoll_fd = epRT.epoll_fd;
-
+    memset(&ep[id], 0, sizeof(ep[id]));
+    err = CO_epoll_create(&ep[id], cTmrThreadInterval_us);
+    if(err != CO_ERROR_NO) {
+        return NULL;
+    }
+    iface_socket.epoll_fd = ep[id].epoll_fd;
     /* initialize CANopen */
 
-    err = CO_CANinit(CO, (void*)&iface_socket, 0);
+    err = CO_CANinit(co, (void*)&iface_socket, 0);
     if (err != CO_ERROR_NO) {
-        return false;
-    }
-    uint16_t scaledBitrate = bitrate / 1000;
-    CO_LSS_address_t lssAddress = {.identity = {
-            .vendorID = OD_RAM.x1018_identityObject.vendorId,
-            .productCode = OD_RAM.x1018_identityObject.productCode,
-            .revisionNumber = OD_RAM.x1018_identityObject.revisionNumber,
-            .serialNumber = OD_RAM.x1018_identityObject.serialNumber
-        }};
-    err = CO_LSSinit(CO, &lssAddress, &node_id, &scaledBitrate);
-    if(err != CO_ERROR_NO) {
-        return false;
+        return NULL;
     }
 
-        // Start the Node
+    // Start the Node
+    OD_t *OD = NULL;
+    switch(id)
+    {
+        case 0:
+            OD = OD_PORT;
+            break;
+        case 1:
+            OD = OD_STARBOARD;
+            break;
+        case 2:
+            OD = OD_ELEVATOR;
+            break;
+        case 3:
+            OD = OD_LIFT;
+            break;
+        default:
+            break;
+    }
     uint32_t errInfo = 0;
-    err = CO_CANopenInit(CO,                /* CANopen object */
+    err = CO_CANopenInit(co,                /* CANopen object */
                          NULL,              /* alternate NMT */
                          NULL,              /* alternate em */
                          OD,                /* Object dictionary */
@@ -1800,11 +1745,10 @@ bool CO_init(uint8_t node_id, uint32_t bitrate) {
                          node_id,
                          &errInfo);
     if(err != CO_ERROR_NO && err != CO_ERROR_NODE_ID_UNCONFIGURED_LSS) {
-        return false;
+        return NULL;
     }
-
-     err = CO_CANopenInitPDO(CO,             /* CANopen object */
-                            CO->em,         /* emergency object */
+    err = CO_CANopenInitPDO(co,             /* CANopen object */
+                            co->em,         /* emergency object */
                             OD,             /* Object dictionary */
                             node_id,
                             &errInfo);
@@ -1815,52 +1759,46 @@ bool CO_init(uint8_t node_id, uint32_t bitrate) {
         else {
             log_printf(LOG_CRIT, DBG_CAN_OPEN, "CO_CANopenInitPDO()", err);
         }
-        return false;
+        return NULL;
     }
-
-    CO_CANsetNormalMode(CO->CANmodule);
-    return true;
+    CO_CANsetNormalMode(co->CANmodule);
+    return co;
 }
 
-
-bool CO_SendSDO_float(
+//----------------------------------------------------------------------------------------------------------------------------
+int CO_SendSDO_float(
+    CO_t *co,
     uint16_t idx,
     uint8_t subidx,
     uint8_t node,
     float value,
     uint32_t timeDifference_us)
 {
-    CO_SDO_return_t SDO_ret = CO_SDOclient_setup(CO->SDOclient,
+    CO_SDO_return_t SDO_ret = CO_SDOclient_setup(co->SDOclient,
                                     CO_CAN_ID_SDO_CLI + node,
                                     CO_CAN_ID_SDO_SRV + node,
                                     node);
     if (SDO_ret != CO_SDO_RT_ok_communicationEnd)
-    {
-        //printf("TestPrint CO_SendSDO_float error %d\n", SDO_ret);
-        return false;
-    }
+        return SDO_ret;
 
-    SDO_ret = CO_SDOclientDownloadInitiate(CO->SDOclient,
+    SDO_ret = CO_SDOclientDownloadInitiate(co->SDOclient,
                                 idx,
                                 subidx,
                                 sizeof(value),
                                 500,
                                 false);
     if (SDO_ret != CO_SDO_RT_ok_communicationEnd)
-    {
-        //printf("TestPrint CO_SendSDO_float error2 %d\n", SDO_ret);
-        return false;
-    }
+        return SDO_ret;
 
-    CO_fifo_write(&CO->SDOclient->bufFifo, (uint8_t *)&value, sizeof(value), NULL);
+    CO_fifo_write(&co->SDOclient->bufFifo, (uint8_t *)&value, sizeof(value), NULL);
 
     /* if data size was not known before and is known now, update SDO */
-    CO_SDOclientDownloadInitiateSize(CO->SDOclient, sizeof(value));
+    CO_SDOclientDownloadInitiateSize(co->SDOclient, sizeof(value));
     int loop = 0;
     CO_SDO_abortCode_t abortCode;
     size_t sizeTransferred;
     do {
-        SDO_ret = CO_SDOclientDownload(CO->SDOclient,
+        SDO_ret = CO_SDOclientDownload(co->SDOclient,
                                     timeDifference_us,
                                     false,
                                     false,
@@ -1872,14 +1810,14 @@ bool CO_SendSDO_float(
         }
     } while (SDO_ret == CO_SDO_RT_blockDownldInProgress);
     if (SDO_ret != CO_SDO_RT_ok_communicationEnd)
-    {
-        //printf("TestPrint CO_SendSDO_float error3 %d\n", SDO_ret);
-        return false;
-    }
-    return true;
+        return SDO_ret;
+
+    return SDO_ret;
 }
 
+//----------------------------------------------------------------------------------------------------------------------------
 bool CO_SendSDO_bytes(
+    CO_t *co,
     uint16_t idx,
     uint8_t subidx,
     uint8_t node,
@@ -1887,13 +1825,13 @@ bool CO_SendSDO_bytes(
     size_t size,
     uint32_t timeDifference_us)
 {
-    CO_SDO_return_t SDO_ret = CO_SDOclient_setup(CO->SDOclient,
+    CO_SDO_return_t SDO_ret = CO_SDOclient_setup(co->SDOclient,
                                     CO_CAN_ID_SDO_CLI + node,
                                     CO_CAN_ID_SDO_SRV + node,
                                     node);
     if (SDO_ret != CO_SDO_RT_ok_communicationEnd)
         return false;
-    SDO_ret = CO_SDOclientDownloadInitiate(CO->SDOclient,
+    SDO_ret = CO_SDOclientDownloadInitiate(co->SDOclient,
                                 idx,
                                 subidx,
                                 size,
@@ -1901,15 +1839,15 @@ bool CO_SendSDO_bytes(
                                 false);
     if (SDO_ret != CO_SDO_RT_ok_communicationEnd)
         return false;
-    CO_fifo_write(&CO->SDOclient->bufFifo, values, size, NULL);
+    CO_fifo_write(&co->SDOclient->bufFifo, values, size, NULL);
 
     /* if data size was not known before and is known now, update SDO */
-    CO_SDOclientDownloadInitiateSize(CO->SDOclient, size);
+    CO_SDOclientDownloadInitiateSize(co->SDOclient, size);
     int loop = 0;
     CO_SDO_abortCode_t abortCode;
     size_t sizeTransferred;
     do {
-        SDO_ret = CO_SDOclientDownload(CO->SDOclient,
+        SDO_ret = CO_SDOclientDownload(co->SDOclient,
                                     timeDifference_us,
                                     false,
                                     false,
