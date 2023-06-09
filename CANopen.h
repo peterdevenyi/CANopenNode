@@ -270,6 +270,8 @@ typedef struct {
     uint16_t CNT_TRACE;
     OD_entry_t *ENTRY_H2000; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H2001; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H5820; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H58A0; /**< OD entry for @ref CO_RPDO_init() */
 } CO_config_t;
 #else
 typedef void CO_config_t;
@@ -673,8 +675,13 @@ void CO_process_SRDO(CO_t *co,
 #endif
 
 //! Setup a new node instance for a remote device.
-CO_t *CO_init(CO_config_t *config, uint8_t node_id, uint8_t id, uint32_t bitrate, const char* device);
-void CO_start(CO_t *co, int index, int node_id);
+CO_t *CO_init(CO_config_t *config, OD_t *OD, uint8_t node_id, uint8_t id, uint32_t bitrate, const char* device);
+ODR_t OD_readUpdated(OD_stream_t *stream, void *buf,
+                      OD_size_t count, OD_size_t *countRead);
+ODR_t OD_writeUpdated(OD_stream_t *stream, const void *buf,
+                       OD_size_t count, OD_size_t *countWritten);
+void CO_NMT_send(CO_t *co, int node_id);
+void CO_set_normal_mode(CO_t *co);
 //! Polls for new PDO/NMT/SDO messages.
 bool CO_exec_epoll(CO_t *co, int index);
 bool CO_is_operational(CO_t *co);

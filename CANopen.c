@@ -1631,9 +1631,6 @@ ODR_t OD_writeUpdated(OD_stream_t *stream, const void *buf,
     return returnCode;
 }
 
-uint8_t *OD_actuatorCommand_flagsPDO = NULL;
-uint8_t *OD_actuatorState_flagsPDO = NULL;
-
 //----------------------------------------------------------------------------------------------------------------------------
 bool CO_is_operational(CO_t *co)
 {
@@ -1641,11 +1638,9 @@ bool CO_is_operational(CO_t *co)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------
-void CO_start(CO_t *co, int index, int node_id)
+void CO_NMT_send(CO_t *co, int node_id)
 {
     CO_NMT_sendCommand(co->NMT, CO_NMT_ENTER_OPERATIONAL, node_id);
-    uint8_t setupHBConsumerTime[4] = {0xC8, 0x00, 0x01, 0x00};
-    CO_SendSDO_bytes(co, 0x1016, 1, node_id, &setupHBConsumerTime[0], 4, 0);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------
@@ -1675,20 +1670,6 @@ CO_t *CO_init(CO_config_t *config, uint8_t node_id, uint8_t id, uint32_t bitrate
         return NULL;
     }
 
-    OD_extension_t OD_actuatorCommand_extension;
-    OD_actuatorCommand_extension.object = OD_GET(H2000, OD_H2000_PDO_ACTUATOR_COMMANDS);
-    OD_actuatorCommand_extension.read = OD_readUpdated;
-    OD_actuatorCommand_extension.write = OD_writeUpdated;
-    OD_extension_init(OD_GET(H2000, OD_H2000_PDO_ACTUATOR_COMMANDS),
-                      &OD_actuatorCommand_extension);
-    OD_actuatorCommand_flagsPDO = OD_getFlagsPDO(OD_GET(H2000, OD_H2000_PDO_ACTUATOR_COMMANDS));
-    OD_extension_t OD_actuatorStates_extension;
-    OD_actuatorStates_extension.object = OD_GET(H2001, OD_H2001_PDO_ACTUATOR_STATES);
-    OD_actuatorStates_extension.read = OD_readUpdated;
-    OD_actuatorStates_extension.write = OD_writeUpdated;
-    OD_extension_init(OD_GET(H2001, OD_H2001_PDO_ACTUATOR_STATES),
-                      &OD_actuatorStates_extension);
-    OD_actuatorState_flagsPDO = OD_getFlagsPDO(OD_GET(H2001, OD_H2001_PDO_ACTUATOR_STATES));
 
     CO_ReturnError_t err = CO_ERROR_NO;
     uint32_t cTmrThreadInterval_us = 80000;
@@ -1711,24 +1692,6 @@ CO_t *CO_init(CO_config_t *config, uint8_t node_id, uint8_t id, uint32_t bitrate
     }
 
     // Start the Node
-    OD_t *OD = NULL;
-    switch(id)
-    {
-        case 0:
-            OD = OD_PORT;
-            break;
-        case 1:
-            OD = OD_STARBOARD;
-            break;
-        case 2:
-            OD = OD_ELEVATOR;
-            break;
-        case 3:
-            OD = OD_LIFT;
-            break;
-        default:
-            break;
-    }
     uint32_t errInfo = 0;
     err = CO_CANopenInit(co,                /* CANopen object */
                          NULL,              /* alternate NMT */
@@ -1759,8 +1722,13 @@ CO_t *CO_init(CO_config_t *config, uint8_t node_id, uint8_t id, uint32_t bitrate
         }
         return NULL;
     }
-    CO_CANsetNormalMode(co->CANmodule);
     return co;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------
+void CO_set_normal_mode(CO_t *co)
+{
+    CO_CANsetNormalMode(co->CANmodule);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------
