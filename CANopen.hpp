@@ -1,7 +1,7 @@
 /**
  * Main CANopenNode file.
  *
- * @file        CANopen.h
+ * @file        CANopen.hpp
  * @ingroup     CO_CANopen
  * @author      Janez Paternoster
  * @author      Uwe Kindler
@@ -25,8 +25,7 @@
  */
 
 
-#ifndef CANopen_H
-#define CANopen_H
+#pragma once
 
 #include "301/CO_driver.h"
 #include "301/CO_ODinterface.h"
@@ -46,7 +45,6 @@
 #include "309/CO_gateway_ascii.h"
 #include "extra/CO_trace.h"
 
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -63,7 +61,7 @@ extern "C" {
  *
  * CANopenNode homepage is https://github.com/CANopenNode/CANopenNode
  *
- * CANopen.h file combines all CANopenNode source files. @ref CO_STACK_CONFIG
+ * CANopen.hpp file combines all CANopenNode source files. @ref CO_STACK_CONFIG
  * is first defined in "CO_config.h" file. Number of different CANopenNode
  * objects used is configured with @ref CO_config_t structure or is read
  * directly from "OD.h" file, if single object dictionary definition is used.
@@ -272,6 +270,8 @@ typedef struct {
     OD_entry_t *ENTRY_H2001; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H5820; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H58A0; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H2410; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H2400; /**< OD entry for @ref CO_RPDO_init() */
 } CO_config_t;
 #else
 typedef void CO_config_t;
@@ -418,6 +418,8 @@ typedef struct {
 } CO_t;
 
 
+#define MAX_EPOLL_COUNT 9
+
 /**
  * Create new CANopen object
  *
@@ -438,7 +440,7 @@ typedef struct {
  * @return Successfully allocated and configured CO_t object or NULL.
  */
 CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed);
-
+CO_t *CO_new_no_can_init(CO_config_t *config, uint32_t *heapMemoryUsed);
 
 /**
  * Delete CANopen object and free memory. Must be called at program exit.
@@ -446,6 +448,7 @@ CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed);
  * @param co CANopen object.
  */
 void CO_delete(CO_t *co);
+void CO_delete_no_can(CO_t *co);
 
 
 /**
@@ -681,6 +684,10 @@ ODR_t OD_readUpdated(OD_stream_t *stream, void *buf,
 ODR_t OD_writeUpdated(OD_stream_t *stream, const void *buf,
                        OD_size_t count, OD_size_t *countWritten);
 void CO_NMT_send(CO_t *co, int node_id);
+
+void CO_send_NMT_HBT(
+   CO_t *co,
+   int index);
 void CO_set_normal_mode(CO_t *co);
 //! Polls for new PDO/NMT/SDO messages.
 bool CO_exec_epoll(CO_t *co, int index);
@@ -702,11 +709,10 @@ bool CO_SendSDO_bytes(
    uint8_t* values,
    size_t size,
    uint32_t timeDifference_us);
+void CO_process_recv(CO_t *co, int index);
 
 /** @} */ /* CO_CANopen */
 
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */
-
-#endif /* CANopen_H */

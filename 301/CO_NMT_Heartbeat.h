@@ -304,6 +304,7 @@ void CO_NMT_initCallbackChanged(CO_NMT_t *NMT,
  */
 CO_NMT_reset_cmd_t CO_NMT_process(CO_NMT_t *NMT,
                                   CO_NMT_internalState_t *NMTstate,
+                                  bool skipHBT,
                                   uint32_t timeDifference_us,
                                   uint32_t *timerNext_us);
 

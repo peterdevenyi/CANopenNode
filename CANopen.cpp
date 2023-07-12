@@ -23,19 +23,12 @@
  * limitations under the License.
  */
 
-#include "CANopen.h"
-#include <CO_epoll_interface.h>
+#include "CANopen.hpp"
 #include <px4_platform_common/log.h>
-#ifdef NUTTX_PLATFORM
-#include <board_config.h>
-#endif // NUTTX_PLATFORM
+#include <CO_epoll_interface.h>
 
 /* Get values from CO_config_t or from single default OD.h ********************/
 #ifdef CO_MULTIPLE_OD
-#include "OD_port_flap.h"
-#include "OD_starbrd_flap.h"
-#include "OD_elev_flap.h"
-#include "OD_lift.h"
 #define CO_GET_CO(obj) co->obj
 #define CO_GET_CNT(obj) co->config->CNT_##obj
 #define OD_GET(entry, index) co->config->ENTRY_##entry
@@ -311,13 +304,13 @@
  * Allocate memory for number of elements, each of specific size
  * Allocated memory must be reset to all zeros
  */
-#define CO_alloc(num, size)             calloc((num), (size))
+#define CO_alloc(type, num, size)       (type*)calloc((num), (size))
 #define CO_free(ptr)                    free((ptr))
 
 #endif
 
 /* Define macros for allocation */
-#define CO_alloc_break_on_fail(var, num, size)   if (((var) = CO_alloc((num), (size))) != NULL) { mem += (size) * (num); } else { break; }
+#define CO_alloc_break_on_fail(type, var, num, size)   if (((var) = CO_alloc(type, (num), (size))) != NULL) { mem += (size) * (num); } else { break; }
 
 #ifdef CO_MULTIPLE_OD
 #define ON_MULTI_OD(sentence) sentence
@@ -326,22 +319,20 @@
 #endif
 
 /* default values for CO_CANopenInit() */
-#define NMT_CONTROL \
-            CO_NMT_STARTUP_TO_OPERATIONAL \
-          | CO_NMT_ERR_ON_ERR_REG \
-          | CO_ERR_REG_GENERIC_ERR \
-          | CO_ERR_REG_COMMUNICATION
+constexpr uint16_t c_NMTControl =
+            CO_NMT_STARTUP_TO_OPERATIONAL
+          | CO_NMT_ERR_ON_ERR_REG
+          | CO_ERR_REG_GENERIC_ERR
+          | CO_ERR_REG_COMMUNICATION;
 #define FIRST_HB_TIME 500
 #define SDO_SRV_TIMEOUT_TIME 1000
 #define SDO_CLI_TIMEOUT_TIME 500
 #define SDO_CLI_BLOCK false
 #define OD_STATUS_BITS NULL
 
-#define MAX_EPOLL_COUNT 10
 CO_epoll_t ep[MAX_EPOLL_COUNT];
 
-
-CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed) {
+CO_t *CO_new_no_can_init(CO_config_t *config, uint32_t *heapMemoryUsed) {
     CO_t *co = NULL;
     /* return values */
     CO_t *coFinal = NULL;
@@ -375,7 +366,7 @@ CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed) {
 #endif
 
         /* CANopen object */
-        CO_alloc_break_on_fail(co, 1, sizeof(*co));
+        CO_alloc_break_on_fail(CO_t, co, 1, sizeof(*co));
 
 #ifdef CO_MULTIPLE_OD
         co->config = config;
@@ -386,7 +377,7 @@ CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed) {
         ON_MULTI_OD(uint8_t TX_CNT_NMT_MST = 0);
         ON_MULTI_OD(uint8_t TX_CNT_HB_PROD = 0);
         if (CO_GET_CNT(NMT) == 1) {
-            CO_alloc_break_on_fail(co->NMT, CO_GET_CNT(NMT), sizeof(*co->NMT));
+            CO_alloc_break_on_fail(CO_NMT_t, co->NMT, CO_GET_CNT(NMT), sizeof(*co->NMT));
             ON_MULTI_OD(RX_CNT_NMT_SLV = 1);
  #if (CO_CONFIG_NMT) & CO_CONFIG_NMT_MASTER
             ON_MULTI_OD(TX_CNT_NMT_MST = 1);
@@ -398,8 +389,8 @@ CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed) {
         ON_MULTI_OD(uint8_t RX_CNT_HB_CONS = 0);
         if (CO_GET_CNT(HB_CONS) == 1) {
             uint8_t countOfMonitoredNodes = CO_GET_CNT(ARR_1016);
-            CO_alloc_break_on_fail(co->HBcons, CO_GET_CNT(HB_CONS), sizeof(*co->HBcons));
-            CO_alloc_break_on_fail(co->HBconsMonitoredNodes, countOfMonitoredNodes, sizeof(*co->HBconsMonitoredNodes));
+            CO_alloc_break_on_fail(CO_HBconsumer_t, co->HBcons, CO_GET_CNT(HB_CONS), sizeof(*co->HBcons));
+            CO_alloc_break_on_fail(CO_HBconsNode_t, co->HBconsMonitoredNodes, countOfMonitoredNodes, sizeof(*co->HBconsMonitoredNodes));
             ON_MULTI_OD(RX_CNT_HB_CONS = countOfMonitoredNodes);
         }
 #endif
@@ -408,7 +399,7 @@ CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed) {
         ON_MULTI_OD(uint8_t RX_CNT_EM_CONS = 0);
         ON_MULTI_OD(uint8_t TX_CNT_EM_PROD = 0);
         if (CO_GET_CNT(EM) == 1) {
-            CO_alloc_break_on_fail(co->em, CO_GET_CNT(EM), sizeof(*co->em));
+            CO_alloc_break_on_fail(CO_EM_t, co->em, CO_GET_CNT(EM), sizeof(*co->em));
  #if (CO_CONFIG_EM) & CO_CONFIG_EM_CONSUMER
             ON_MULTI_OD(RX_CNT_EM_CONS = 1);
  #endif
@@ -418,7 +409,7 @@ CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed) {
  #if (CO_CONFIG_EM) & (CO_CONFIG_EM_PRODUCER | CO_CONFIG_EM_HISTORY)
             uint8_t fifoSize = CO_GET_CNT(ARR_1003) + 1;
             if (fifoSize >= 2) {
-                CO_alloc_break_on_fail(co->em_fifo, fifoSize, sizeof(*co->em_fifo));
+                CO_alloc_break_on_fail(CO_EM_fifo_t, co->em_fifo, fifoSize, sizeof(*co->em_fifo));
             }
  #endif
         }
@@ -427,7 +418,7 @@ CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed) {
         ON_MULTI_OD(uint8_t RX_CNT_SDO_SRV = 0);
         ON_MULTI_OD(uint8_t TX_CNT_SDO_SRV = 0);
         if (CO_GET_CNT(SDO_SRV) > 0) {
-            CO_alloc_break_on_fail(co->SDOserver, CO_GET_CNT(SDO_SRV), sizeof(*co->SDOserver));
+            CO_alloc_break_on_fail(CO_SDOserver_t, co->SDOserver, CO_GET_CNT(SDO_SRV), sizeof(*co->SDOserver));
             ON_MULTI_OD(RX_CNT_SDO_SRV = config->CNT_SDO_SRV);
             ON_MULTI_OD(TX_CNT_SDO_SRV = config->CNT_SDO_SRV);
         }
@@ -436,7 +427,7 @@ CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed) {
         ON_MULTI_OD(uint8_t RX_CNT_SDO_CLI = 0);
         ON_MULTI_OD(uint8_t TX_CNT_SDO_CLI = 0);
         if (CO_GET_CNT(SDO_CLI) > 0) {
-            CO_alloc_break_on_fail(co->SDOclient, CO_GET_CNT(SDO_CLI), sizeof(*co->SDOclient));
+            CO_alloc_break_on_fail(CO_SDOclient_t,co->SDOclient, CO_GET_CNT(SDO_CLI), sizeof(*co->SDOclient));
             ON_MULTI_OD(RX_CNT_SDO_CLI = config->CNT_SDO_CLI);
             ON_MULTI_OD(TX_CNT_SDO_CLI = config->CNT_SDO_CLI);
         }
@@ -446,7 +437,7 @@ CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed) {
         ON_MULTI_OD(uint8_t RX_CNT_TIME = 0);
         ON_MULTI_OD(uint8_t TX_CNT_TIME = 0);
         if (CO_GET_CNT(TIME) == 1) {
-            CO_alloc_break_on_fail(co->TIME, CO_GET_CNT(TIME), sizeof(*co->TIME));
+            CO_alloc_break_on_fail(CO_TIME_t, co->TIME, CO_GET_CNT(TIME), sizeof(*co->TIME));
             ON_MULTI_OD(RX_CNT_TIME = 1);
  #if (CO_CONFIG_TIME) & CO_CONFIG_TIME_PRODUCER
             ON_MULTI_OD(TX_CNT_TIME = 1);
@@ -458,7 +449,7 @@ CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed) {
         ON_MULTI_OD(uint8_t RX_CNT_SYNC = 0);
         ON_MULTI_OD(uint8_t TX_CNT_SYNC = 0);
         if (CO_GET_CNT(SYNC) == 1) {
-            CO_alloc_break_on_fail(co->SYNC, CO_GET_CNT(SYNC), sizeof(*co->SYNC));
+            CO_alloc_break_on_fail(CO_SYNC_t, co->SYNC, CO_GET_CNT(SYNC), sizeof(*co->SYNC));
             ON_MULTI_OD(RX_CNT_SYNC = 1);
  #if (CO_CONFIG_SYNC) & CO_CONFIG_SYNC_PRODUCER
             ON_MULTI_OD(TX_CNT_SYNC = 1);
@@ -469,7 +460,7 @@ CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed) {
 #if (CO_CONFIG_PDO) & CO_CONFIG_RPDO_ENABLE
         ON_MULTI_OD(uint16_t RX_CNT_RPDO = 0);
         if (CO_GET_CNT(RPDO) > 0) {
-            CO_alloc_break_on_fail(co->RPDO, CO_GET_CNT(RPDO), sizeof(*co->RPDO));
+            CO_alloc_break_on_fail(CO_RPDO_t, co->RPDO, CO_GET_CNT(RPDO), sizeof(*co->RPDO));
             ON_MULTI_OD(RX_CNT_RPDO = config->CNT_RPDO);
         }
 #endif
@@ -477,14 +468,14 @@ CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed) {
 #if (CO_CONFIG_PDO) & CO_CONFIG_TPDO_ENABLE
         ON_MULTI_OD(uint16_t TX_CNT_TPDO = 0);
         if (CO_GET_CNT(TPDO) > 0) {
-            CO_alloc_break_on_fail(co->TPDO, CO_GET_CNT(TPDO), sizeof(*co->TPDO));
+            CO_alloc_break_on_fail(CO_TPDO_t, co->TPDO, CO_GET_CNT(TPDO), sizeof(*co->TPDO));
             ON_MULTI_OD(TX_CNT_TPDO = config->CNT_TPDO);
         }
 #endif
 
 #if (CO_CONFIG_LEDS) & CO_CONFIG_LEDS_ENABLE
         if (CO_GET_CNT(LEDS) == 1) {
-            CO_alloc_break_on_fail(co->LEDs, CO_GET_CNT(LEDS), sizeof(*co->LEDs));
+            CO_alloc_break_on_fail(CO_LEDs_t, co->LEDs, CO_GET_CNT(LEDS), sizeof(*co->LEDs));
         }
 #endif
 
@@ -492,7 +483,7 @@ CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed) {
         ON_MULTI_OD(uint8_t RX_CNT_GFC = 0);
         ON_MULTI_OD(uint8_t TX_CNT_GFC = 0);
         if (CO_GET_CNT(GFC) == 1) {
-            CO_alloc_break_on_fail(co->GFC, CO_GET_CNT(GFC), sizeof(*co->GFC));
+            CO_alloc_break_on_fail(CO_GFC_t, co->GFC, CO_GET_CNT(GFC), sizeof(*co->GFC));
             ON_MULTI_OD(RX_CNT_GFC = 1);
             ON_MULTI_OD(TX_CNT_GFC = 1);
         }
@@ -502,8 +493,8 @@ CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed) {
         ON_MULTI_OD(uint8_t RX_CNT_SRDO = 0);
         ON_MULTI_OD(uint8_t TX_CNT_SRDO = 0);
         if (CO_GET_CNT(SRDO) > 0) {
-            CO_alloc_break_on_fail(co->SRDOGuard, 1, sizeof(*co->SRDOGuard));
-            CO_alloc_break_on_fail(co->SRDO, CO_GET_CNT(SRDO), sizeof(*co->SRDO));
+            CO_alloc_break_on_fail(CO_SRDOGuard_t, co->SRDOGuard, 1, sizeof(*co->SRDOGuard));
+            CO_alloc_break_on_fail(CO_SRDO_t, co->SRDO, CO_GET_CNT(SRDO), sizeof(*co->SRDO));
             ON_MULTI_OD(RX_CNT_SRDO = config->CNT_SRDO * 2);
             ON_MULTI_OD(TX_CNT_SRDO = config->CNT_SRDO * 2);
         }
@@ -513,7 +504,7 @@ CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed) {
         ON_MULTI_OD(uint8_t RX_CNT_LSS_SLV = 0);
         ON_MULTI_OD(uint8_t TX_CNT_LSS_SLV = 0);
         if (CO_GET_CNT(LSS_SLV) == 1) {
-            CO_alloc_break_on_fail(co->LSSslave, CO_GET_CNT(LSS_SLV), sizeof(*co->LSSslave));
+            CO_alloc_break_on_fail(CO_LSSslave_t, co->LSSslave, CO_GET_CNT(LSS_SLV), sizeof(*co->LSSslave));
             ON_MULTI_OD(RX_CNT_LSS_SLV = 1);
             ON_MULTI_OD(TX_CNT_LSS_SLV = 1);
         }
@@ -523,7 +514,7 @@ CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed) {
         ON_MULTI_OD(uint8_t RX_CNT_LSS_MST = 0);
         ON_MULTI_OD(uint8_t TX_CNT_LSS_MST = 0);
         if (CO_GET_CNT(LSS_MST) == 1) {
-            CO_alloc_break_on_fail(co->LSSmaster, CO_GET_CNT(LSS_MST), sizeof(*co->LSSmaster));
+            CO_alloc_break_on_fail(CO_LSSmaster_t, co->LSSmaster, CO_GET_CNT(LSS_MST), sizeof(*co->LSSmaster));
             ON_MULTI_OD(RX_CNT_LSS_MST = 1);
             ON_MULTI_OD(TX_CNT_LSS_MST = 1);
         }
@@ -531,13 +522,13 @@ CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed) {
 
 #if (CO_CONFIG_GTW) & CO_CONFIG_GTW_ASCII
         if (CO_GET_CNT(GTWA) == 1) {
-            CO_alloc_break_on_fail(co->gtwa, CO_GET_CNT(GTWA), sizeof(*co->gtwa));
+            CO_alloc_break_on_fail(CO_GTWA_t, co->gtwa, CO_GET_CNT(GTWA), sizeof(*co->gtwa));
         }
 #endif
 
 #if (CO_CONFIG_TRACE) & CO_CONFIG_TRACE_ENABLE
         if (CO_GET_CNT(TRACE) > 0) {
-            CO_alloc_break_on_fail(co->trace, CO_GET_CNT(TRACE), sizeof(*co->trace));
+            CO_alloc_break_on_fail(CO_trace_t, co->trace, CO_GET_CNT(TRACE), sizeof(*co->trace));
         }
 #endif
 
@@ -577,7 +568,6 @@ CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed) {
         co->RX_IDX_LSS_MST = idxRx; idxRx += RX_CNT_LSS_MST;
 #endif
         co->CNT_ALL_RX_MSGS = idxRx;
-
         int16_t idxTx = 0;
         co->TX_IDX_NMT_MST = idxTx; idxTx += TX_CNT_NMT_MST;
 #if (CO_CONFIG_SYNC) & CO_CONFIG_SYNC_ENABLE
@@ -610,14 +600,293 @@ CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed) {
         co->CNT_ALL_TX_MSGS = idxTx;
 #endif /* #ifdef CO_MULTIPLE_OD */
 
+        /* finish successfully, set other parameters */
+        co->nodeIdUnconfigured = true;
+        coFinal = co;
+    } while (false);
+
+    if (coFinal == NULL) {
+        CO_delete(co);
+    }
+    if (heapMemoryUsed != NULL) {
+        *heapMemoryUsed = mem;
+    }
+    return coFinal;
+}
+
+CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed) {
+    CO_t *co = NULL;
+    /* return values */
+    CO_t *coFinal = NULL;
+    uint32_t mem = 0;
+
+    /* For each object:
+     * - allocate memory, verify allocation and calculate size of heap used
+     * - if CO_MULTIPLE_OD is defined:
+     *   - use config structure
+     *   - calculate number of CANrx and CYNtx messages: RX_CNT_xx and TX_CNT_xx
+     *   - calculate indexes: RX_IDX_xx and TX_IDX_xx
+     *   - calculate total count of CAN message buffers: CNT_ALL_RX_MSGS and
+     *     CNT_ALL_TX_MSGS. */
+
+    do {
+#ifdef CO_MULTIPLE_OD
+        /* verify arguments */
+        if (config == NULL || config->CNT_NMT > 1 || config->CNT_HB_CONS > 1
+            || config->CNT_EM > 1 || config->CNT_SDO_SRV > 128
+            || config->CNT_SDO_CLI > 128 || config->CNT_SYNC > 1
+            || config->CNT_RPDO > 512 || config->CNT_TPDO > 512
+            || config->CNT_TIME > 1 || config->CNT_LEDS > 1
+            || config->CNT_GFC > 1 || config->CNT_SRDO > 64
+            || config->CNT_LSS_SLV > 1 || config->CNT_LSS_MST > 1
+            || config->CNT_GTWA > 1
+        ) {
+            break;
+        }
+#else
+        (void) config;
+#endif
+
+        /* CANopen object */
+        CO_alloc_break_on_fail(CO_t, co, 1, sizeof(*co));
+
+#ifdef CO_MULTIPLE_OD
+        co->config = config;
+#endif
+
+        /* NMT_Heartbeat */
+        ON_MULTI_OD(uint8_t RX_CNT_NMT_SLV = 0);
+        ON_MULTI_OD(uint8_t TX_CNT_NMT_MST = 0);
+        ON_MULTI_OD(uint8_t TX_CNT_HB_PROD = 0);
+        if (CO_GET_CNT(NMT) == 1) {
+            CO_alloc_break_on_fail(CO_NMT_t, co->NMT, CO_GET_CNT(NMT), sizeof(*co->NMT));
+            ON_MULTI_OD(RX_CNT_NMT_SLV = 1);
+ #if (CO_CONFIG_NMT) & CO_CONFIG_NMT_MASTER
+            ON_MULTI_OD(TX_CNT_NMT_MST = 1);
+ #endif
+            ON_MULTI_OD(TX_CNT_HB_PROD = 1);
+        }
+
+#if (CO_CONFIG_HB_CONS) & CO_CONFIG_HB_CONS_ENABLE
+        ON_MULTI_OD(uint8_t RX_CNT_HB_CONS = 0);
+        if (CO_GET_CNT(HB_CONS) == 1) {
+            uint8_t countOfMonitoredNodes = CO_GET_CNT(ARR_1016);
+            CO_alloc_break_on_fail(CO_HBconsumer_t, co->HBcons, CO_GET_CNT(HB_CONS), sizeof(*co->HBcons));
+            CO_alloc_break_on_fail(CO_HBconsNode_t, co->HBconsMonitoredNodes, countOfMonitoredNodes, sizeof(*co->HBconsMonitoredNodes));
+            ON_MULTI_OD(RX_CNT_HB_CONS = countOfMonitoredNodes);
+        }
+#endif
+
+        /* Emergency */
+        ON_MULTI_OD(uint8_t RX_CNT_EM_CONS = 0);
+        ON_MULTI_OD(uint8_t TX_CNT_EM_PROD = 0);
+        if (CO_GET_CNT(EM) == 1) {
+            CO_alloc_break_on_fail(CO_EM_t, co->em, CO_GET_CNT(EM), sizeof(*co->em));
+ #if (CO_CONFIG_EM) & CO_CONFIG_EM_CONSUMER
+            ON_MULTI_OD(RX_CNT_EM_CONS = 1);
+ #endif
+ #if (CO_CONFIG_EM) & CO_CONFIG_EM_PRODUCER
+            ON_MULTI_OD(TX_CNT_EM_PROD = 1);
+ #endif
+ #if (CO_CONFIG_EM) & (CO_CONFIG_EM_PRODUCER | CO_CONFIG_EM_HISTORY)
+            uint8_t fifoSize = CO_GET_CNT(ARR_1003) + 1;
+            if (fifoSize >= 2) {
+                CO_alloc_break_on_fail(CO_EM_fifo_t, co->em_fifo, fifoSize, sizeof(*co->em_fifo));
+            }
+ #endif
+        }
+
+        /* SDOserver */
+        ON_MULTI_OD(uint8_t RX_CNT_SDO_SRV = 0);
+        ON_MULTI_OD(uint8_t TX_CNT_SDO_SRV = 0);
+        if (CO_GET_CNT(SDO_SRV) > 0) {
+            CO_alloc_break_on_fail(CO_SDOserver_t, co->SDOserver, CO_GET_CNT(SDO_SRV), sizeof(*co->SDOserver));
+            ON_MULTI_OD(RX_CNT_SDO_SRV = config->CNT_SDO_SRV);
+            ON_MULTI_OD(TX_CNT_SDO_SRV = config->CNT_SDO_SRV);
+        }
+
+#if (CO_CONFIG_SDO_CLI) & CO_CONFIG_SDO_CLI_ENABLE
+        ON_MULTI_OD(uint8_t RX_CNT_SDO_CLI = 0);
+        ON_MULTI_OD(uint8_t TX_CNT_SDO_CLI = 0);
+        if (CO_GET_CNT(SDO_CLI) > 0) {
+            CO_alloc_break_on_fail(CO_SDOclient_t,co->SDOclient, CO_GET_CNT(SDO_CLI), sizeof(*co->SDOclient));
+            ON_MULTI_OD(RX_CNT_SDO_CLI = config->CNT_SDO_CLI);
+            ON_MULTI_OD(TX_CNT_SDO_CLI = config->CNT_SDO_CLI);
+        }
+#endif
+
+#if (CO_CONFIG_TIME) & CO_CONFIG_TIME_ENABLE
+        ON_MULTI_OD(uint8_t RX_CNT_TIME = 0);
+        ON_MULTI_OD(uint8_t TX_CNT_TIME = 0);
+        if (CO_GET_CNT(TIME) == 1) {
+            CO_alloc_break_on_fail(CO_TIME_t, co->TIME, CO_GET_CNT(TIME), sizeof(*co->TIME));
+            ON_MULTI_OD(RX_CNT_TIME = 1);
+ #if (CO_CONFIG_TIME) & CO_CONFIG_TIME_PRODUCER
+            ON_MULTI_OD(TX_CNT_TIME = 1);
+ #endif
+        }
+#endif
+
+#if (CO_CONFIG_SYNC) & CO_CONFIG_SYNC_ENABLE
+        ON_MULTI_OD(uint8_t RX_CNT_SYNC = 0);
+        ON_MULTI_OD(uint8_t TX_CNT_SYNC = 0);
+        if (CO_GET_CNT(SYNC) == 1) {
+            CO_alloc_break_on_fail(CO_SYNC_t, co->SYNC, CO_GET_CNT(SYNC), sizeof(*co->SYNC));
+            ON_MULTI_OD(RX_CNT_SYNC = 1);
+ #if (CO_CONFIG_SYNC) & CO_CONFIG_SYNC_PRODUCER
+            ON_MULTI_OD(TX_CNT_SYNC = 1);
+ #endif
+        }
+#endif
+
+#if (CO_CONFIG_PDO) & CO_CONFIG_RPDO_ENABLE
+        ON_MULTI_OD(uint16_t RX_CNT_RPDO = 0);
+        if (CO_GET_CNT(RPDO) > 0) {
+            CO_alloc_break_on_fail(CO_RPDO_t, co->RPDO, CO_GET_CNT(RPDO), sizeof(*co->RPDO));
+            ON_MULTI_OD(RX_CNT_RPDO = config->CNT_RPDO);
+        }
+#endif
+
+#if (CO_CONFIG_PDO) & CO_CONFIG_TPDO_ENABLE
+        ON_MULTI_OD(uint16_t TX_CNT_TPDO = 0);
+        if (CO_GET_CNT(TPDO) > 0) {
+            CO_alloc_break_on_fail(CO_TPDO_t, co->TPDO, CO_GET_CNT(TPDO), sizeof(*co->TPDO));
+            ON_MULTI_OD(TX_CNT_TPDO = config->CNT_TPDO);
+        }
+#endif
+
+#if (CO_CONFIG_LEDS) & CO_CONFIG_LEDS_ENABLE
+        if (CO_GET_CNT(LEDS) == 1) {
+            CO_alloc_break_on_fail(CO_LEDs_t, co->LEDs, CO_GET_CNT(LEDS), sizeof(*co->LEDs));
+        }
+#endif
+
+#if (CO_CONFIG_GFC) & CO_CONFIG_GFC_ENABLE
+        ON_MULTI_OD(uint8_t RX_CNT_GFC = 0);
+        ON_MULTI_OD(uint8_t TX_CNT_GFC = 0);
+        if (CO_GET_CNT(GFC) == 1) {
+            CO_alloc_break_on_fail(CO_GFC_t, co->GFC, CO_GET_CNT(GFC), sizeof(*co->GFC));
+            ON_MULTI_OD(RX_CNT_GFC = 1);
+            ON_MULTI_OD(TX_CNT_GFC = 1);
+        }
+#endif
+
+#if (CO_CONFIG_SRDO) & CO_CONFIG_SRDO_ENABLE
+        ON_MULTI_OD(uint8_t RX_CNT_SRDO = 0);
+        ON_MULTI_OD(uint8_t TX_CNT_SRDO = 0);
+        if (CO_GET_CNT(SRDO) > 0) {
+            CO_alloc_break_on_fail(CO_SRDOGuard_t, co->SRDOGuard, 1, sizeof(*co->SRDOGuard));
+            CO_alloc_break_on_fail(CO_SRDO_t, co->SRDO, CO_GET_CNT(SRDO), sizeof(*co->SRDO));
+            ON_MULTI_OD(RX_CNT_SRDO = config->CNT_SRDO * 2);
+            ON_MULTI_OD(TX_CNT_SRDO = config->CNT_SRDO * 2);
+        }
+#endif
+
+#if (CO_CONFIG_LSS) & CO_CONFIG_LSS_SLAVE
+        ON_MULTI_OD(uint8_t RX_CNT_LSS_SLV = 0);
+        ON_MULTI_OD(uint8_t TX_CNT_LSS_SLV = 0);
+        if (CO_GET_CNT(LSS_SLV) == 1) {
+            CO_alloc_break_on_fail(CO_LSSslave_t, co->LSSslave, CO_GET_CNT(LSS_SLV), sizeof(*co->LSSslave));
+            ON_MULTI_OD(RX_CNT_LSS_SLV = 1);
+            ON_MULTI_OD(TX_CNT_LSS_SLV = 1);
+        }
+#endif
+
+#if (CO_CONFIG_LSS) & CO_CONFIG_LSS_MASTER
+        ON_MULTI_OD(uint8_t RX_CNT_LSS_MST = 0);
+        ON_MULTI_OD(uint8_t TX_CNT_LSS_MST = 0);
+        if (CO_GET_CNT(LSS_MST) == 1) {
+            CO_alloc_break_on_fail(CO_LSSmaster_t, co->LSSmaster, CO_GET_CNT(LSS_MST), sizeof(*co->LSSmaster));
+            ON_MULTI_OD(RX_CNT_LSS_MST = 1);
+            ON_MULTI_OD(TX_CNT_LSS_MST = 1);
+        }
+#endif
+
+#if (CO_CONFIG_GTW) & CO_CONFIG_GTW_ASCII
+        if (CO_GET_CNT(GTWA) == 1) {
+            CO_alloc_break_on_fail(CO_GTWA_t, co->gtwa, CO_GET_CNT(GTWA), sizeof(*co->gtwa));
+        }
+#endif
+
+#if (CO_CONFIG_TRACE) & CO_CONFIG_TRACE_ENABLE
+        if (CO_GET_CNT(TRACE) > 0) {
+            CO_alloc_break_on_fail(CO_trace_t, co->trace, CO_GET_CNT(TRACE), sizeof(*co->trace));
+        }
+#endif
+
+#ifdef CO_MULTIPLE_OD
+        /* Indexes of CO_CANrx_t and CO_CANtx_t objects in CO_CANmodule_t and
+         * total number of them. Indexes are sorted in a way, that objects with
+         * highest priority of the CAN identifier are listed first. */
+        int16_t idxRx = 0;
+        co->RX_IDX_NMT_SLV = idxRx; idxRx += RX_CNT_NMT_SLV;
+#if (CO_CONFIG_SYNC) & CO_CONFIG_SYNC_ENABLE
+        co->RX_IDX_SYNC = idxRx; idxRx += RX_CNT_SYNC;
+#endif
+        co->RX_IDX_EM_CONS = idxRx; idxRx += RX_CNT_EM_CONS;
+#if (CO_CONFIG_TIME) & CO_CONFIG_TIME_ENABLE
+        co->RX_IDX_TIME = idxRx; idxRx += RX_CNT_TIME;
+#endif
+#if (CO_CONFIG_GFC) & CO_CONFIG_GFC_ENABLE
+        co->RX_IDX_GFC = idxRx; idxRx += RX_CNT_GFC;
+#endif
+#if (CO_CONFIG_SRDO) & CO_CONFIG_SRDO_ENABLE
+        co->RX_IDX_SRDO = idxRx; idxRx += RX_CNT_SRDO * 2;
+#endif
+#if (CO_CONFIG_PDO) & CO_CONFIG_RPDO_ENABLE
+        co->RX_IDX_RPDO = idxRx; idxRx += RX_CNT_RPDO;
+#endif
+        co->RX_IDX_SDO_SRV = idxRx; idxRx += RX_CNT_SDO_SRV;
+#if (CO_CONFIG_SDO_CLI) & CO_CONFIG_SDO_CLI_ENABLE
+        co->RX_IDX_SDO_CLI = idxRx; idxRx += RX_CNT_SDO_CLI;
+#endif
+#if (CO_CONFIG_HB_CONS) & CO_CONFIG_HB_CONS_ENABLE
+        co->RX_IDX_HB_CONS = idxRx; idxRx += RX_CNT_HB_CONS;
+#endif
+#if (CO_CONFIG_LSS) & CO_CONFIG_LSS_SLAVE
+        co->RX_IDX_LSS_SLV = idxRx; idxRx += RX_CNT_LSS_SLV;
+#endif
+#if (CO_CONFIG_LSS) & CO_CONFIG_LSS_MASTER
+        co->RX_IDX_LSS_MST = idxRx; idxRx += RX_CNT_LSS_MST;
+#endif
+        co->CNT_ALL_RX_MSGS = idxRx;
+        int16_t idxTx = 0;
+        co->TX_IDX_NMT_MST = idxTx; idxTx += TX_CNT_NMT_MST;
+#if (CO_CONFIG_SYNC) & CO_CONFIG_SYNC_ENABLE
+        co->TX_IDX_SYNC = idxTx; idxTx += TX_CNT_SYNC;
+#endif
+        co->TX_IDX_EM_PROD = idxTx; idxTx += TX_CNT_EM_PROD;
+#if (CO_CONFIG_TIME) & CO_CONFIG_TIME_ENABLE
+        co->TX_IDX_TIME = idxTx; idxTx += TX_CNT_TIME;
+#endif
+#if (CO_CONFIG_GFC) & CO_CONFIG_GFC_ENABLE
+        co->TX_IDX_GFC = idxTx; idxTx += TX_CNT_GFC;
+#endif
+#if (CO_CONFIG_SRDO) & CO_CONFIG_SRDO_ENABLE
+        co->TX_IDX_SRDO = idxTx; idxTx += TX_CNT_SRDO * 2;
+#endif
+#if (CO_CONFIG_PDO) & CO_CONFIG_TPDO_ENABLE
+        co->TX_IDX_TPDO = idxTx; idxTx += TX_CNT_TPDO;
+#endif
+        co->TX_IDX_SDO_SRV = idxTx; idxTx += TX_CNT_SDO_SRV;
+#if (CO_CONFIG_SDO_CLI) & CO_CONFIG_SDO_CLI_ENABLE
+        co->TX_IDX_SDO_CLI = idxTx; idxTx += TX_CNT_SDO_CLI;
+#endif
+        co->TX_IDX_HB_PROD = idxTx; idxTx += TX_CNT_HB_PROD;
+#if (CO_CONFIG_LSS) & CO_CONFIG_LSS_SLAVE
+        co->TX_IDX_LSS_SLV = idxTx; idxTx += TX_CNT_LSS_SLV;
+#endif
+#if (CO_CONFIG_LSS) & CO_CONFIG_LSS_MASTER
+        co->TX_IDX_LSS_MST = idxTx; idxTx += TX_CNT_LSS_MST;
+#endif
+        co->CNT_ALL_TX_MSGS = idxTx;
+#endif /* #ifdef CO_MULTIPLE_OD */
         /* CANmodule */
-        CO_alloc_break_on_fail(co->CANmodule, 1, sizeof(*co->CANmodule));
-
+        CO_alloc_break_on_fail(CO_CANmodule_t, co->CANmodule, 1, sizeof(*co->CANmodule));
         /* CAN RX blocks */
-        CO_alloc_break_on_fail(co->CANrx, CO_GET_CO(CNT_ALL_RX_MSGS), sizeof(*co->CANrx));
-
+        CO_alloc_break_on_fail(CO_CANrx_t, co->CANrx, CO_GET_CO(CNT_ALL_RX_MSGS), sizeof(*co->CANrx));
         /* CAN TX blocks */
-        CO_alloc_break_on_fail(co->CANtx, CO_GET_CO(CNT_ALL_TX_MSGS), sizeof(*co->CANtx));
+        CO_alloc_break_on_fail(CO_CANtx_t, co->CANtx, CO_GET_CO(CNT_ALL_TX_MSGS), sizeof(*co->CANtx));
 
         /* finish successfully, set other parameters */
         co->nodeIdUnconfigured = true;
@@ -631,6 +900,81 @@ CO_t *CO_new(CO_config_t *config, uint32_t *heapMemoryUsed) {
         *heapMemoryUsed = mem;
     }
     return coFinal;
+}
+
+void CO_delete_no_can(CO_t *co) {
+    if (co == NULL) {
+        return;
+    }
+
+#if (CO_CONFIG_TRACE) & CO_CONFIG_TRACE_ENABLE
+    CO_free(co->trace);
+#endif
+
+#if (CO_CONFIG_GTW) & CO_CONFIG_GTW_ASCII
+    CO_free(co->gtwa);
+#endif
+
+#if (CO_CONFIG_LSS) & CO_CONFIG_LSS_MASTER
+    CO_free(co->LSSmaster);
+#endif
+
+#if (CO_CONFIG_LSS) & CO_CONFIG_LSS_SLAVE
+    CO_free(co->LSSslave);
+#endif
+
+#if (CO_CONFIG_SRDO) & CO_CONFIG_SRDO_ENABLE
+    CO_free(co->SRDO);
+    CO_free(co->SRDOGuard);
+#endif
+
+#if (CO_CONFIG_GFC) & CO_CONFIG_GFC_ENABLE
+    CO_free(co->GFC);
+#endif
+
+#if (CO_CONFIG_LEDS) & CO_CONFIG_LEDS_ENABLE
+    CO_free(co->LEDs);
+#endif
+
+#if (CO_CONFIG_PDO) & CO_CONFIG_TPDO_ENABLE
+    CO_free(co->TPDO);
+#endif
+
+#if (CO_CONFIG_PDO) & CO_CONFIG_RPDO_ENABLE
+    CO_free(co->RPDO);
+#endif
+
+#if (CO_CONFIG_SYNC) & CO_CONFIG_SYNC_ENABLE
+    CO_free(co->SYNC);
+#endif
+
+#if (CO_CONFIG_TIME) & CO_CONFIG_TIME_ENABLE
+    CO_free(co->TIME);
+#endif
+
+#if (CO_CONFIG_SDO_CLI) & CO_CONFIG_SDO_CLI_ENABLE
+    free(co->SDOclient);
+#endif
+
+    /* SDOserver */
+    CO_free(co->SDOserver);
+
+    /* Emergency */
+    CO_free(co->em);
+#if (CO_CONFIG_EM) & (CO_CONFIG_EM_PRODUCER | CO_CONFIG_EM_HISTORY)
+    CO_free(co->em_fifo);
+#endif
+
+#if (CO_CONFIG_HB_CONS) & CO_CONFIG_HB_CONS_ENABLE
+    CO_free(co->HBconsMonitoredNodes);
+    CO_free(co->HBcons);
+#endif
+
+    /* NMT_Heartbeat */
+    CO_free(co->NMT);
+
+    /* CANopen object */
+    CO_free(co);
 }
 
 void CO_delete(CO_t *co) {
@@ -1217,7 +1561,6 @@ CO_ReturnError_t CO_CANopenInit(CO_t *co,
         }
     }
 #endif
-
     return CO_ERROR_NO;
 }
 
@@ -1382,6 +1725,7 @@ CO_NMT_reset_cmd_t CO_process(CO_t *co,
     if (CO_GET_CNT(NMT) == 1) {
         reset = CO_NMT_process(co->NMT,
                                &NMTstate,
+                               CO_GET_CNT(HB_PROD) == 0,
                                timeDifference_us,
                                timerNext_us);
     }
@@ -1545,7 +1889,7 @@ ODR_t OD_readUpdated(OD_stream_t *stream, void *buf,
     }
 
     OD_size_t dataLenToCopy = stream->dataLength; /* length of OD variable */
-    const uint8_t *dataOrig = stream->dataOrig;
+    const uint8_t *dataOrig = (const uint8_t*)stream->dataOrig;
 
     if (dataOrig == NULL) {
         return ODR_SUB_NOT_EXIST;
@@ -1589,7 +1933,7 @@ ODR_t OD_writeUpdated(OD_stream_t *stream, const void *buf,
     }
 
     OD_size_t dataLenToCopy = stream->dataLength; /* length of OD variable */
-    uint8_t *dataOrig = stream->dataOrig;
+    uint8_t *dataOrig = (uint8_t*)stream->dataOrig;
 
     if (dataOrig == NULL) {
         return ODR_SUB_NOT_EXIST;
@@ -1658,7 +2002,15 @@ bool CO_exec_epoll(CO_t *co, int index)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------
-CO_t *CO_init(CO_config_t *config, uint8_t node_id, uint8_t id, uint32_t bitrate, const char* device) {
+void CO_process_recv(CO_t *co, int index)
+{
+    CO_epoll_t *epoll = &ep[index];
+    CO_epoll_wait(epoll, co);
+    CO_epoll_processLast(&ep[index]);
+}
+
+//----------------------------------------------------------------------------------------------------------------------------
+CO_t *CO_init(CO_config_t *config,  OD_t *OD, uint8_t node_id, uint8_t id, uint32_t bitrate, const char* device) {
     uint32_t _heapMemoryUsed= 0;
     CO_t *co = CO_new(config, &_heapMemoryUsed);
     if (co == NULL)
@@ -1672,7 +2024,7 @@ CO_t *CO_init(CO_config_t *config, uint8_t node_id, uint8_t id, uint32_t bitrate
 
 
     CO_ReturnError_t err = CO_ERROR_NO;
-    uint32_t cTmrThreadInterval_us = 80000;
+    uint32_t cTmrThreadInterval_us = 500;
     if (id >= MAX_EPOLL_COUNT)
     {
         log_printf(LOG_DEBUG, DBG_ERRNO, "To many Epoll insances");
@@ -1698,7 +2050,7 @@ CO_t *CO_init(CO_config_t *config, uint8_t node_id, uint8_t id, uint32_t bitrate
                          NULL,              /* alternate em */
                          OD,                /* Object dictionary */
                          OD_STATUS_BITS,    /* Optional OD_statusBits */
-                         (CO_NMT_control_t)NMT_CONTROL,       /* CO_NMT_control_t */
+                         (CO_NMT_control_t)c_NMTControl,       /* CO_NMT_control_t */
                          FIRST_HB_TIME,     /* firstHBTime_ms */
                          SDO_SRV_TIMEOUT_TIME, /* SDOserverTimeoutTime_ms */
                          SDO_CLI_TIMEOUT_TIME, /* SDOclientTimeoutTime_ms */
@@ -1723,6 +2075,24 @@ CO_t *CO_init(CO_config_t *config, uint8_t node_id, uint8_t id, uint32_t bitrate
         return NULL;
     }
     return co;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------
+void CO_send_NMT_HBT(
+    CO_t *co,
+    int index)
+{
+    CO_NMT_internalState_t NMTstate = CO_NMT_getInternalState(co->NMT);
+    /* NMT_Heartbeat */
+    CO_epoll_t *epoll = &ep[index];
+    CO_epoll_wait(epoll, co);
+    if (CO_GET_CNT(NMT) == 1) {
+        CO_NMT_process(co->NMT,
+                               &NMTstate,
+                               false,
+                               epoll->timeDifference_us,
+                               &(epoll->timerNext_us));
+    }
 }
 
 //----------------------------------------------------------------------------------------------------------------------------

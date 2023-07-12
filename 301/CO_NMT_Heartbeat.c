@@ -220,6 +220,7 @@ void CO_NMT_initCallbackChanged(CO_NMT_t *NMT,
 /******************************************************************************/
 CO_NMT_reset_cmd_t CO_NMT_process(CO_NMT_t *NMT,
                                   CO_NMT_internalState_t *NMTstate,
+                                  bool skipHBT,
                                   uint32_t timeDifference_us,
                                   uint32_t *timerNext_us)
 {
@@ -238,8 +239,11 @@ CO_NMT_reset_cmd_t CO_NMT_process(CO_NMT_t *NMT,
                     && (NMT->HBproducerTimer == 0
                         || NMTstateCpy != NMT->operatingStatePrev)
     )) {
-        NMT->HB_TXbuff->data[0] = (uint8_t) NMTstateCpy;
-        CO_CANsend(NMT->HB_CANdevTx, NMT->HB_TXbuff);
+        if (!skipHBT)
+        {
+            NMT->HB_TXbuff->data[0] = (uint8_t) NMTstateCpy;
+            CO_CANsend(NMT->HB_CANdevTx, NMT->HB_TXbuff);
+        }
 
         if (NMTstateCpy == CO_NMT_INITIALIZING) {
             /* NMT slave self starting */

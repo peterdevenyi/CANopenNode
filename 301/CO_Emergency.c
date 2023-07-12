@@ -722,8 +722,10 @@ void CO_error(CO_EM_t *em, bool_t setError, const uint8_t errorBit,
     if (index >= (CO_CONFIG_EM_ERR_STATUS_BITS_COUNT / 8)) {
         index = CO_EM_WRONG_ERROR_REPORT >> 3;
         bitmask = 1 << (CO_EM_WRONG_ERROR_REPORT & 0x7);
+#if (CO_CONFIG_EM) & (CO_CONFIG_EM_PRODUCER | CO_CONFIG_EM_HISTORY)
         errorCode = CO_EMC_SOFTWARE_INTERNAL;
         infoCode = errorBit;
+#endif
     }
 
     uint8_t *errorStatusBits = &em->errorStatusBits[index];
@@ -740,7 +742,9 @@ void CO_error(CO_EM_t *em, bool_t setError, const uint8_t errorBit,
         if (errorStatusBitMasked == 0) {
             return;
         }
+#if (CO_CONFIG_EM) & (CO_CONFIG_EM_PRODUCER | CO_CONFIG_EM_HISTORY)
         errorCode = CO_EMC_NO_ERROR;
+#endif
     }
 
 #if (CO_CONFIG_EM) & (CO_CONFIG_EM_PRODUCER | CO_CONFIG_EM_HISTORY)
