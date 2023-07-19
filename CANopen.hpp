@@ -269,9 +269,15 @@ typedef struct {
     OD_entry_t *ENTRY_H2000; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H2001; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H5820; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H5830; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H58A0; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H58B0; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H2410; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H2400; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H6040; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H6041; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H6042; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H6044; /**< OD entry for @ref CO_RPDO_init() */
 } CO_config_t;
 #else
 typedef void CO_config_t;
@@ -678,7 +684,7 @@ void CO_process_SRDO(CO_t *co,
 #endif
 
 //! Setup a new node instance for a remote device.
-CO_t *CO_init(CO_config_t *config, OD_t *OD, uint8_t node_id, uint8_t id, uint32_t bitrate, const char* device);
+CO_t *CO_init(CO_config_t *config, OD_t *OD, uint8_t node_id, uint8_t index, uint32_t bitrate, const char* device);
 ODR_t OD_readUpdated(OD_stream_t *stream, void *buf,
                       OD_size_t count, OD_size_t *countRead);
 ODR_t OD_writeUpdated(OD_stream_t *stream, const void *buf,
@@ -700,6 +706,13 @@ int CO_SendSDO_float(
    uint8_t node,
    float value,
    uint32_t timeDifference_us);
+int CO_SendSDO_uint16(
+    CO_t *co,
+    uint16_t idx,
+    uint8_t subidx,
+    uint8_t node,
+    uint16_t value,
+    uint32_t timeDifference_us);
 //! Sends an SDO message of a bytearray value with \a size to the device defined by \a node.
 bool CO_SendSDO_bytes(
    CO_t *co,

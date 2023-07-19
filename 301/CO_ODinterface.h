@@ -111,10 +111,6 @@ typedef enum {
     OD_H1600_RXPDO_1_MAPPING    = 0x1600U,/**< RXPDO mapping parameters */
     OD_H1800_TXPDO_1_PARAM      = 0x1800U,/**< TXPDO communication parameter */
     OD_H1A00_TXPDO_1_MAPPING    = 0x1A00U,/**< TXPDO mapping parameters */
-    OD_H2000_PDO_ACTUATOR_COMMANDS    = 0x2000U,/**< TXPDO mapping parameters */
-    OD_H2001_PDO_ACTUATOR_STATES    = 0x2001U,/**< TXPDO mapping parameters */
-    OD_H2400_PDO_OUTPUTS        = 0x2400U,/**< TXPDO mapping parameters */
-    OD_H2410_PDO_INPUTS         = 0x2410U,/**< TXPDO mapping parameters */
 } OD_ObjDicId_30x_t;
 
 

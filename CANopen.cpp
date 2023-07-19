@@ -2010,7 +2010,7 @@ void CO_process_recv(CO_t *co, int index)
 }
 
 //----------------------------------------------------------------------------------------------------------------------------
-CO_t *CO_init(CO_config_t *config,  OD_t *OD, uint8_t node_id, uint8_t id, uint32_t bitrate, const char* device) {
+CO_t *CO_init(CO_config_t *config,  OD_t *OD, uint8_t node_id, uint8_t index, uint32_t bitrate, const char* device) {
     uint32_t _heapMemoryUsed= 0;
     CO_t *co = CO_new(config, &_heapMemoryUsed);
     if (co == NULL)
@@ -2022,20 +2022,20 @@ CO_t *CO_init(CO_config_t *config,  OD_t *OD, uint8_t node_id, uint8_t id, uint3
         return NULL;
     }
 
-
     CO_ReturnError_t err = CO_ERROR_NO;
     uint32_t cTmrThreadInterval_us = 500;
-    if (id >= MAX_EPOLL_COUNT)
+    if (index >= MAX_EPOLL_COUNT)
     {
         log_printf(LOG_DEBUG, DBG_ERRNO, "To many Epoll insances");
         return NULL;
     }
-    memset(&ep[id], 0, sizeof(ep[id]));
-    err = CO_epoll_create(&ep[id], cTmrThreadInterval_us);
+    memset(&ep[index], 0, sizeof(ep[index]));
+    err = CO_epoll_create(&ep[index], cTmrThreadInterval_us);
     if(err != CO_ERROR_NO) {
         return NULL;
     }
-    iface_socket.epoll_fd = ep[id].epoll_fd;
+
+    iface_socket.epoll_fd = ep[index].epoll_fd;
     /* initialize CANopen */
 
     err = CO_CANinit(co, (void*)&iface_socket, 0);
@@ -2060,6 +2060,7 @@ CO_t *CO_init(CO_config_t *config,  OD_t *OD, uint8_t node_id, uint8_t id, uint3
     if(err != CO_ERROR_NO && err != CO_ERROR_NODE_ID_UNCONFIGURED_LSS) {
         return NULL;
     }
+
     err = CO_CANopenInitPDO(co,             /* CANopen object */
                             co->em,         /* emergency object */
                             OD,             /* Object dictionary */
@@ -2074,6 +2075,7 @@ CO_t *CO_init(CO_config_t *config,  OD_t *OD, uint8_t node_id, uint8_t id, uint3
         }
         return NULL;
     }
+
     return co;
 }
 
@@ -2108,6 +2110,56 @@ int CO_SendSDO_float(
     uint8_t subidx,
     uint8_t node,
     float value,
+    uint32_t timeDifference_us)
+{
+    CO_SDO_return_t SDO_ret = CO_SDOclient_setup(co->SDOclient,
+                                    CO_CAN_ID_SDO_CLI + node,
+                                    CO_CAN_ID_SDO_SRV + node,
+                                    node);
+    if (SDO_ret != CO_SDO_RT_ok_communicationEnd)
+        return SDO_ret;
+
+    SDO_ret = CO_SDOclientDownloadInitiate(co->SDOclient,
+                                idx,
+                                subidx,
+                                sizeof(value),
+                                500,
+                                false);
+    if (SDO_ret != CO_SDO_RT_ok_communicationEnd)
+        return SDO_ret;
+
+    CO_fifo_write(&co->SDOclient->bufFifo, (uint8_t *)&value, sizeof(value), NULL);
+
+    /* if data size was not known before and is known now, update SDO */
+    CO_SDOclientDownloadInitiateSize(co->SDOclient, sizeof(value));
+    int loop = 0;
+    CO_SDO_abortCode_t abortCode;
+    size_t sizeTransferred;
+    do {
+        SDO_ret = CO_SDOclientDownload(co->SDOclient,
+                                    timeDifference_us,
+                                    false,
+                                    false,
+                                    &abortCode,
+                                    &sizeTransferred,
+                                    NULL);
+        if (++loop >= CO_CONFIG_GTW_BLOCK_DL_LOOP) {
+            break;
+        }
+    } while (SDO_ret == CO_SDO_RT_blockDownldInProgress);
+    if (SDO_ret != CO_SDO_RT_ok_communicationEnd)
+        return SDO_ret;
+
+    return SDO_ret;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------
+int CO_SendSDO_uint16(
+    CO_t *co,
+    uint16_t idx,
+    uint8_t subidx,
+    uint8_t node,
+    uint16_t value,
     uint32_t timeDifference_us)
 {
     CO_SDO_return_t SDO_ret = CO_SDOclient_setup(co->SDOclient,
