@@ -722,6 +722,10 @@ bool CO_SendSDO_bytes(
    uint8_t* values,
    size_t size,
    uint32_t timeDifference_us);
+//! Reads SDO from the device.
+CO_SDO_abortCode_t CO_ReadSDO_uint8(CO_t *co, uint8_t nodeId,
+                            uint16_t index, uint8_t subIndex,
+                            uint8_t *buf);
 void CO_process_recv(CO_t *co, int index);
 
 /** @} */ /* CO_CANopen */

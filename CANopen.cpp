@@ -319,11 +319,18 @@
 #endif
 
 /* default values for CO_CANopenInit() */
+// NOTE: Disabled Stop on error, as it degrades the performance.
+// Most error cause is TX overflow, which we just ignore at the moment
 constexpr uint16_t c_NMTControl =
             CO_NMT_STARTUP_TO_OPERATIONAL
-          | CO_NMT_ERR_ON_ERR_REG
           | CO_ERR_REG_GENERIC_ERR
-          | CO_ERR_REG_COMMUNICATION;
+          | CO_ERR_REG_COMMUNICATION
+          | CO_NMT_ERR_FREE_TO_OPERATIONAL;
+// constexpr uint16_t c_NMTControl =
+//             CO_NMT_STARTUP_TO_OPERATIONAL
+//           | CO_NMT_ERR_ON_ERR_REG
+//           | CO_ERR_REG_GENERIC_ERR
+//           | CO_ERR_REG_COMMUNICATION;
 #define FIRST_HB_TIME 500
 #define SDO_SRV_TIMEOUT_TIME 1000
 #define SDO_CLI_TIMEOUT_TIME 500
@@ -1998,7 +2005,7 @@ bool CO_exec_epoll(CO_t *co, int index)
     CO_epoll_processRT(&ep[index], co, false);
     CO_epoll_processMain(&ep[index], co, false, &reset);
     CO_epoll_processLast(&ep[index]);
-    return true;
+    return !CO_isError(co->em, CO_EM_RPDO_TIME_OUT);
 }
 
 //----------------------------------------------------------------------------------------------------------------------------
@@ -2249,4 +2256,45 @@ bool CO_SendSDO_bytes(
     if (SDO_ret != CO_SDO_RT_ok_communicationEnd)
         return false;
     return true;
+}
+
+//----------------------------------------------------------------------------------------------------------------------------
+CO_SDO_abortCode_t CO_ReadSDO_uint8(CO_t *co, uint8_t nodeId,
+                            uint16_t index, uint8_t subIndex,
+                            uint8_t *buf)
+{
+    CO_SDO_return_t SDO_ret;
+
+    // setup client (this can be skipped, if remote device don't change)
+    SDO_ret = CO_SDOclient_setup(co->SDOclient,
+                                 CO_CAN_ID_SDO_CLI + nodeId,
+                                 CO_CAN_ID_SDO_SRV + nodeId,
+                                 nodeId);
+    if (SDO_ret != CO_SDO_RT_ok_communicationEnd) {
+        return CO_SDO_AB_GENERAL;
+    }
+
+    // initiate upload
+    SDO_ret = CO_SDOclientUploadInitiate(co->SDOclient, index, subIndex, 1000, false);
+    if (SDO_ret != CO_SDO_RT_ok_communicationEnd) {
+        return CO_SDO_AB_GENERAL;
+    }
+
+    // upload data
+    CO_SDO_abortCode_t abortCode = CO_SDO_AB_NONE;
+
+    SDO_ret = CO_SDOclientUpload(co->SDOclient,
+                                    2,
+                                    false,
+                                    &abortCode,
+                                    NULL, NULL, NULL);
+    if (SDO_ret < 0) {
+        return abortCode;
+    }
+
+    // copy data to the user buffer (for long data function must be called
+    // several times inside the loop)
+    CO_SDOclientUploadBufRead(co->SDOclient, buf, 1);
+
+    return CO_SDO_AB_NONE;
 }
