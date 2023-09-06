@@ -278,6 +278,13 @@ typedef struct {
     OD_entry_t *ENTRY_H6041; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H6042; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H6044; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H6063; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H6077; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H606C; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H6078; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H607A; /**< OD entry for @ref CO_TPDO_init() */
+    OD_entry_t *ENTRY_H60E0; /**< OD entry for @ref CO_TPDO_init() */
+    OD_entry_t *ENTRY_H60E1; /**< OD entry for @ref CO_TPDO_init() */
 } CO_config_t;
 #else
 typedef void CO_config_t;
