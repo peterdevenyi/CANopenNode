@@ -611,7 +611,8 @@ static ODR_t OD_write_14xx(OD_stream_t *stream, const void *buf,
     case 5: { /* event-timer */
         uint32_t eventTime = CO_getUint16(buf);
         RPDO->timeoutTime_us = eventTime * 1000;
-        RPDO->timeoutTimer = 0;
+        // We want to enable monitoring of RPDO from the very beginning, hence the value 1.
+        RPDO->timeoutTimer = 1;
         break;
     }
 #endif
@@ -917,7 +918,8 @@ void CO_RPDO_process(CO_RPDO_t *RPDO,
             CO_FLAG_CLEAR(RPDO->CANrxNew[0]);
             CO_FLAG_CLEAR(RPDO->CANrxNew[1]);
  #if (CO_CONFIG_PDO) & CO_CONFIG_RPDO_TIMERS_ENABLE
-            RPDO->timeoutTimer = 0;
+            // We want to enable monitoring of RPDO from the very beginning, hence the value 1.
+            RPDO->timeoutTimer = 1;
  #endif
         }
 #else
