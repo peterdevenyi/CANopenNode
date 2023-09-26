@@ -272,6 +272,9 @@ typedef struct {
     uint16_t CNT_TRACE;
     OD_entry_t *ENTRY_H2000; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H2001; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H5800; /**< OD entry for @ref CO_TPDO_init() */
+    OD_entry_t *ENTRY_H5801; /**< OD entry for @ref CO_TPDO_init() */
+    OD_entry_t *ENTRY_H5810; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H5820; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H5830; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H58A0; /**< OD entry for @ref CO_RPDO_init() */
