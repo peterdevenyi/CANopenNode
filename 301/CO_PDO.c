@@ -736,6 +736,7 @@ CO_ReturnError_t CO_RPDO_init(CO_RPDO_t *RPDO,
     uint16_t eventTime = 0;
     odRet = OD_get_u16(OD_14xx_RPDOCommPar, 5, &eventTime, true);
     RPDO->timeoutTime_us = (uint32_t)eventTime * 1000;
+    RPDO->timeoutTimer = 1;
 #endif
 
 
@@ -925,7 +926,7 @@ void CO_RPDO_process(CO_RPDO_t *RPDO,
 #else
         CO_FLAG_CLEAR(RPDO->CANrxNew[0]);
  #if (CO_CONFIG_PDO) & CO_CONFIG_RPDO_TIMERS_ENABLE
-        RPDO->timeoutTimer = 0;
+        RPDO->timeoutTimer = 1;
  #endif
 #endif
     }

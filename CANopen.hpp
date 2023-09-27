@@ -704,7 +704,8 @@ ODR_t OD_readUpdated(OD_stream_t *stream, void *buf,
 ODR_t OD_writeUpdated(OD_stream_t *stream, const void *buf,
                        OD_size_t count, OD_size_t *countWritten);
 void CO_NMT_send(CO_t *co, int node_id);
-
+//! Returns true if RPDO arrived on time.
+bool CO_pdo_received(CO_t *co);
 void CO_send_NMT_HBT(
    CO_t *co,
    int index);
