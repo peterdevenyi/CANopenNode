@@ -243,14 +243,20 @@ typedef struct {
     uint16_t CNT_RPDO;
     OD_entry_t *ENTRY_H1400; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H1401; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H1402; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H1600; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H1601; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H1602; /**< OD entry for @ref CO_RPDO_init() */
     /** Number of TPDO objects, from 0 to 512 producers (CANtx) */
     uint16_t CNT_TPDO;
     OD_entry_t *ENTRY_H1800; /**< OD entry for @ref CO_TPDO_init() */
     OD_entry_t *ENTRY_H1801; /**< OD entry for @ref CO_TPDO_init() */
+    OD_entry_t *ENTRY_H1802; /**< OD entry for @ref CO_TPDO_init() */
+    OD_entry_t *ENTRY_H1803; /**< OD entry for @ref CO_TPDO_init() */
     OD_entry_t *ENTRY_H1A00; /**< OD entry for @ref CO_TPDO_init() */
     OD_entry_t *ENTRY_H1A01; /**< OD entry for @ref CO_TPDO_init() */
+    OD_entry_t *ENTRY_H1A02; /**< OD entry for @ref CO_TPDO_init() */
+    OD_entry_t *ENTRY_H1A03; /**< OD entry for @ref CO_TPDO_init() */
     /** Number of LEDs objects, 0 or 1. */
     uint8_t CNT_LEDS;
     /** Number of GFC objects, 0 or 1 (CANrx + CANtx). */
