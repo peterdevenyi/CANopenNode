@@ -287,6 +287,10 @@ typedef struct {
     OD_entry_t *ENTRY_H2008; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H2009; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H200A; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H200B; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H200C; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H200D; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H200E; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H5800; /**< OD entry for @ref CO_TPDO_init() */
     OD_entry_t *ENTRY_H5801; /**< OD entry for @ref CO_TPDO_init() */
     OD_entry_t *ENTRY_H5810; /**< OD entry for @ref CO_RPDO_init() */
@@ -297,6 +301,7 @@ typedef struct {
     OD_entry_t *ENTRY_H2410; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H2400; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H6040; /**< OD entry for @ref CO_RPDO_init() */
+    OD_entry_t *ENTRY_H6043; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H6041; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H6042; /**< OD entry for @ref CO_RPDO_init() */
     OD_entry_t *ENTRY_H6044; /**< OD entry for @ref CO_RPDO_init() */
@@ -453,7 +458,7 @@ typedef struct {
 } CO_t;
 
 
-#define MAX_EPOLL_COUNT 10
+#define MAX_EPOLL_COUNT 12
 
 /**
  * Create new CANopen object
