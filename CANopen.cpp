@@ -1846,7 +1846,7 @@ void CO_process_TPDO(CO_t *co,
                      uint32_t *timerNext_us)
 {
     (void) timeDifference_us; (void) timerNext_us;
-    if (co->nodeIdUnconfigured) {
+    if (co->nodeIdUnconfigured || CO_isError(co->em, CO_EM_RPDO_TIME_OUT)) {
         return;
     }
 
@@ -2036,7 +2036,7 @@ CO_t *CO_init(CO_config_t *config,  OD_t *OD, uint8_t node_id, uint8_t index, ui
     }
 
     CO_ReturnError_t err = CO_ERROR_NO;
-    uint32_t cTmrThreadInterval_us = 500;
+    uint32_t cTmrThreadInterval_us = 2000;
     if (index >= MAX_EPOLL_COUNT)
     {
         log_printf(LOG_DEBUG, DBG_ERRNO, "To many Epoll insances");
