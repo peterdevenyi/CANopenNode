@@ -338,6 +338,8 @@ constexpr uint16_t c_NMTControl =
 #define OD_STATUS_BITS NULL
 
 CO_epoll_t ep[MAX_EPOLL_COUNT];
+// Stores the currently processed SDO status.
+CO_SDO_return_t SDO_status[MAX_EPOLL_COUNT];
 
 CO_t *CO_new_no_can_init(CO_config_t *config, uint32_t *heapMemoryUsed) {
     CO_t *co = NULL;
@@ -2058,6 +2060,7 @@ CO_t *CO_init(CO_config_t *config,  OD_t *OD, uint8_t node_id, uint8_t index, ui
 
     // Start the Node
     uint32_t errInfo = 0;
+    memset(&SDO_status[index], 0, sizeof(SDO_status[index]));
     err = CO_CANopenInit(co,                /* CANopen object */
                          NULL,              /* alternate NMT */
                          NULL,              /* alternate em */
@@ -2226,29 +2229,34 @@ bool CO_SendSDO_bytes(
     size_t size,
     uint32_t timeDifference_us)
 {
-    CO_SDO_return_t SDO_ret = CO_SDOclient_setup(co->SDOclient,
-                                    CO_CAN_ID_SDO_CLI + node,
-                                    CO_CAN_ID_SDO_SRV + node,
-                                    node);
-    if (SDO_ret != CO_SDO_RT_ok_communicationEnd)
-        return false;
-    SDO_ret = CO_SDOclientDownloadInitiate(co->SDOclient,
-                                idx,
-                                subidx,
-                                size,
-                                500,
-                                false);
-    if (SDO_ret != CO_SDO_RT_ok_communicationEnd)
-        return false;
-    CO_fifo_write(&co->SDOclient->bufFifo, values, size, NULL);
+    int node_index = 0;
+    if (SDO_status[node_index] == CO_SDO_RT_ok_communicationEnd)
+    {
+        SDO_status[node_index] = CO_SDOclient_setup(co->SDOclient,
+                                        CO_CAN_ID_SDO_CLI + node,
+                                        CO_CAN_ID_SDO_SRV + node,
+                                        node);
+        if (SDO_status[node_index] != CO_SDO_RT_ok_communicationEnd)
+            return false;
+        SDO_status[node_index] = CO_SDOclientDownloadInitiate(co->SDOclient,
+                                    idx,
+                                    subidx,
+                                    size,
+                                    500,
+                                    false);
 
-    /* if data size was not known before and is known now, update SDO */
-    CO_SDOclientDownloadInitiateSize(co->SDOclient, size);
+        if (SDO_status[node_index] != CO_SDO_RT_ok_communicationEnd)
+            return SDO_status[node_index];
+        CO_fifo_write(&co->SDOclient->bufFifo, values, size, NULL);
+
+        /* if data size was not known before and is known now, update SDO */
+        CO_SDOclientDownloadInitiateSize(co->SDOclient, size);
+    }
     int loop = 0;
     CO_SDO_abortCode_t abortCode;
     size_t sizeTransferred;
     do {
-        SDO_ret = CO_SDOclientDownload(co->SDOclient,
+        SDO_status[node_index] = CO_SDOclientDownload(co->SDOclient,
                                     timeDifference_us,
                                     false,
                                     false,
@@ -2258,8 +2266,9 @@ bool CO_SendSDO_bytes(
         if (++loop >= CO_CONFIG_GTW_BLOCK_DL_LOOP) {
             break;
         }
-    } while (SDO_ret == CO_SDO_RT_blockDownldInProgress);
-    if (SDO_ret != CO_SDO_RT_ok_communicationEnd)
+    } while (SDO_status[node_index] == CO_SDO_RT_blockDownldInProgress);
+
+    if (SDO_status[node_index] != CO_SDO_RT_ok_communicationEnd)
         return false;
     return true;
 }
